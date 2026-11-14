@@ -1,0 +1,13 @@
+---
+source: cli/src/main.rs
+assertion_line: 3324
+expression: "errors.join(\"\\n\")"
+---
+zaino --worktree login: `--worktree` supports new interactive sessions, `zaino fork`, `zaino exec`, and `zaino exec fork`
+zaino fork --worktree: `zaino fork --worktree` requires an explicit session ID
+zaino fork --worktree --last: `zaino fork --worktree` requires an explicit session ID
+zaino exec resume --worktree session: `--worktree` cannot resume an existing session; use `zaino exec fork --worktree`
+zaino exec review --worktree: `--worktree` is not supported for code review
+zaino resume --worktree session: `--worktree` supports new interactive sessions, `zaino fork`, `zaino exec`, and `zaino exec fork`
+zaino archive session --worktree: `--worktree` supports new interactive sessions, `zaino fork`, `zaino exec`, and `zaino exec fork`
+zaino queue --thread session --message hi --worktree: `--worktree` supports new interactive sessions, `zaino fork`, `zaino exec`, and `zaino exec fork`

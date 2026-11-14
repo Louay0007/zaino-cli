@@ -1,0 +1,302 @@
+#!/usr/bin/env node
+// Unified entry point for the Zaino CLI.
+
+import { spawn } from "node:child_process";
+import { existsSync, readFileSync, realpathSync } from "fs";
+import { createRequire } from "node:module";
+import { constants } from "node:os";
+import path from "path";
+import { fileURLToPath } from "url";
+
+// __dirname equivalent in ESM
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
+const zainoPackageRoot = realpathSync(path.join(__dirname, ".."));
+
+const PLATFORM_PACKAGE_BY_TARGET = {
+  "x86_64-unknown-linux-musl": "zainocli-linux-x64",
+  "aarch64-unknown-linux-musl": "zainocli-linux-arm64",
+  "x86_64-apple-darwin": "zainocli-darwin-x64",
+  "aarch64-apple-darwin": "zainocli-darwin-arm64",
+  "x86_64-pc-windows-msvc": "zainocli-win32-x64",
+  "aarch64-pc-windows-msvc": "zainocli-win32-arm64",
+};
+
+const { platform, arch } = process;
+
+let targetTriple = null;
+switch (platform) {
+  case "linux":
+  case "android":
+    switch (arch) {
+      case "x64":
+        targetTriple = "x86_64-unknown-linux-musl";
+        break;
+      case "arm64":
+        targetTriple = "aarch64-unknown-linux-musl";
+        break;
+      default:
+        break;
+    }
+    break;
+  case "darwin":
+    switch (arch) {
+      case "x64":
+        targetTriple = "x86_64-apple-darwin";
+        break;
+      case "arm64":
+        targetTriple = "aarch64-apple-darwin";
+        break;
+      default:
+        break;
+    }
+    break;
+  case "win32":
+    switch (arch) {
+      case "x64":
+        targetTriple = "x86_64-pc-windows-msvc";
+        break;
+      case "arm64":
+        targetTriple = "aarch64-pc-windows-msvc";
+        break;
+      default:
+        break;
+    }
+    break;
+  default:
+    break;
+}
+
+if (!targetTriple) {
+  throw new Error(`Unsupported platform: ${platform} (${arch})`);
+}
+
+const platformPackage = PLATFORM_PACKAGE_BY_TARGET[targetTriple];
+if (!platformPackage) {
+  throw new Error(`Unsupported target triple: ${targetTriple}`);
+}
+
+function findZainoExecutable() {
+  let vendorRoot;
+  try {
+    const packageJsonPath = require.resolve(`${platformPackage}/package.json`);
+    vendorRoot = path.join(path.dirname(packageJsonPath), "vendor");
+  } catch {
+    vendorRoot = path.join(__dirname, "..", "vendor");
+  }
+
+  const zainoExecutable = path.join(
+    vendorRoot,
+    targetTriple,
+    "bin",
+    process.platform === "win32" ? "zaino.exe" : "zaino",
+  );
+  if (existsSync(zainoExecutable)) {
+    return zainoExecutable;
+  }
+
+  const packageManager = detectPackageManager();
+  const updateCommand =
+    packageManager === "bun"
+      ? "bun install -g zainocli@latest"
+      : packageManager === "pnpm"
+        ? "pnpm add -g zainocli@latest"
+        : packageManager === "vite-plus"
+          ? "vp install -g zainocli@latest"
+          : "npm install -g zainocli@latest";
+  throw new Error(
+    `Missing optional dependency ${platformPackage}. Reinstall Zaino: ${updateCommand}`,
+  );
+}
+
+const binaryPath = findZainoExecutable();
+
+function isPnpmOwnedZainoInstall(nodeModulesDir) {
+  if (!existsSync(path.join(nodeModulesDir, ".modules.yaml"))) {
+    return false;
+  }
+
+  try {
+    return (
+      realpathSync(path.join(nodeModulesDir, "@zaino", "cli")) ===
+      zainoPackageRoot
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isVitePlusOwnedZainoInstall(packagesDir) {
+  if (path.basename(packagesDir) !== "packages") {
+    return false;
+  }
+
+  try {
+    const metadata = JSON.parse(
+      readFileSync(path.join(packagesDir, "@zaino", "cli.json"), "utf8"),
+    );
+    if (metadata.name !== "@zaino/cli") {
+      return false;
+    }
+
+    // Vite+ records the active global installation in packages/@zaino/cli.json.
+    // Older installs have no ID or append a #-prefixed ID to the package name;
+    // newer installs put the ID in a subdirectory of the package prefix.
+    const installId = metadata.installId || "";
+    const installDir = installId.startsWith("#")
+      ? path.join(packagesDir, `@zaino/cli${installId}`)
+      : path.join(packagesDir, "@zaino/cli", installId);
+    for (const nodeModulesDir of [
+      path.join(installDir, "lib", "node_modules"),
+      path.join(installDir, "node_modules"),
+    ]) {
+      const packageRoot = path.join(nodeModulesDir, "@zaino", "cli");
+      if (
+        existsSync(packageRoot) &&
+        realpathSync(packageRoot) === zainoPackageRoot
+      ) {
+        return true;
+      }
+    }
+  } catch {
+    // Missing or unreadable ownership metadata must not prevent Zaino starting.
+  }
+  return false;
+}
+
+/**
+ * Use heuristics to detect the package manager that was used to install Zaino
+ * in order to give the user a hint about how to update it.
+ */
+function detectPackageManager() {
+  // Package-manager ownership metadata can be several parents above the package.
+  // Search ancestors of both the canonical package root and lexical entrypoint
+  // because the package manager may link either path.
+  const entrypointDir = path.dirname(path.resolve(process.argv[1]));
+  for (const startDir of new Set([zainoPackageRoot, entrypointDir])) {
+    const filesystemRoot = path.parse(startDir).root;
+    for (
+      let currentDir = startDir;
+      currentDir !== filesystemRoot;
+      currentDir = path.dirname(currentDir)
+    ) {
+      if (isVitePlusOwnedZainoInstall(currentDir)) {
+        return "vite-plus";
+      }
+      if (isPnpmOwnedZainoInstall(path.join(currentDir, "node_modules"))) {
+        return "pnpm";
+      }
+    }
+
+    if (isPnpmOwnedZainoInstall(path.join(filesystemRoot, "node_modules"))) {
+      return "pnpm";
+    }
+  }
+
+  const userAgent = process.env.npm_config_user_agent || "";
+  if (/\bbun\//.test(userAgent)) {
+    return "bun";
+  }
+
+  const execPath = process.env.npm_execpath || "";
+  if (execPath.includes("bun")) {
+    return "bun";
+  }
+
+  if (
+    __dirname.includes(".bun/install/global") ||
+    __dirname.includes(".bun\\install\\global")
+  ) {
+    return "bun";
+  }
+
+  return userAgent ? "npm" : null;
+}
+
+const packageManager = detectPackageManager();
+const packageManagerEnvVar =
+  packageManager === "bun"
+    ? "CODEX_MANAGED_BY_BUN"
+    : packageManager === "pnpm"
+      ? "CODEX_MANAGED_BY_PNPM"
+      : packageManager === "vite-plus"
+        ? "CODEX_MANAGED_BY_VITE_PLUS"
+        : "CODEX_MANAGED_BY_NPM";
+const env = {
+  ...process.env,
+  CODEX_MANAGED_PACKAGE_ROOT: zainoPackageRoot,
+};
+delete env.CODEX_MANAGED_BY_NPM;
+delete env.CODEX_MANAGED_BY_BUN;
+delete env.CODEX_MANAGED_BY_PNPM;
+delete env.CODEX_MANAGED_BY_VITE_PLUS;
+env[packageManagerEnvVar] = "1";
+
+// Replace Node so the native binary receives signals and exits directly.
+// Node exposes execve on Windows too, but calling it there is unsupported.
+if (process.platform !== "win32" && typeof process.execve === "function") {
+  // Node ignores SIGXFSZ, and ignored signals survive execve. Installing a
+  // handler lets execve restore the default disposition in the native binary.
+  process.on("SIGXFSZ", () => {});
+  process.execve(binaryPath, [binaryPath, ...process.argv.slice(2)], env);
+}
+
+// Older Node versions and Windows need a child process. Spawn asynchronously
+// so Node can forward signals while the native binary is executing.
+const child = spawn(binaryPath, process.argv.slice(2), {
+  stdio: "inherit",
+  env,
+});
+
+child.on("error", (err) => {
+  // Typically triggered when the binary is missing or not executable.
+  // Re-throwing here will terminate the parent with a non-zero exit code
+  // while still printing a helpful stack trace.
+  // eslint-disable-next-line no-console
+  console.error(err);
+  process.exit(1);
+});
+
+// Forward common termination signals to the child so that it shuts down
+// gracefully. In the handler we temporarily disable the default behavior of
+// exiting immediately; once the child has been signaled we simply wait for
+// its exit event which will in turn terminate the parent (see below).
+const forwardSignal = (signal) => {
+  if (child.killed) {
+    return;
+  }
+  try {
+    child.kill(signal);
+  } catch {
+    /* ignore */
+  }
+};
+
+["SIGINT", "SIGTERM", "SIGHUP"].forEach((sig) => {
+  process.on(sig, () => forwardSignal(sig));
+});
+
+// When the child exits, mirror its termination reason in the parent so that
+// shell scripts and other tooling observe the correct exit status.
+// Wrap the lifetime of the child process in a Promise so that we can await
+// its termination in a structured way. The Promise resolves with an object
+// describing how the child exited: either via exit code or due to a signal.
+const childResult = await new Promise((resolve) => {
+  child.on("exit", (code, signal) => {
+    if (signal) {
+      resolve({ type: "signal", signal });
+    } else {
+      resolve({ type: "code", exitCode: code ?? 1 });
+    }
+  });
+});
+
+if (childResult.type === "signal") {
+  // Preserve a failure exit code even if Node ignores the re-emitted signal.
+  process.exitCode = 128 + constants.signals[childResult.signal];
+  process.removeAllListeners(childResult.signal);
+  process.kill(process.pid, childResult.signal);
+} else {
+  process.exit(childResult.exitCode);
+}
