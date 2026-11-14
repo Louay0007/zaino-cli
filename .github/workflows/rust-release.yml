@@ -63,7 +63,6 @@ jobs:
     runs-on: ${{ matrix.runner }}
     environment:
       name: bazel
-      deployment: false
     # Linux releases also build the native voice runtime in this job.
     timeout-minutes: 120
     permissions:
@@ -573,7 +572,6 @@ jobs:
     runs-on: ${{ matrix.runner }}
     environment:
       name: bazel
-      deployment: false
     timeout-minutes: 120
     permissions:
       contents: read
@@ -639,7 +637,6 @@ jobs:
     timeout-minutes: 45
     environment:
       name: codesigning
-      deployment: false
     permissions:
       contents: read
       id-token: write
@@ -1218,7 +1215,6 @@ jobs:
     timeout-minutes: 45
     environment:
       name: codesigning
-      deployment: false
     permissions:
       contents: read
       id-token: write
@@ -1663,9 +1659,8 @@ jobs:
   release:
     # Each job checks its channel under this lock; out-of-order builds cannot
     # roll back GitHub, npm, R2, or the canary branch.
-    concurrency: &release-publication
+    concurrency:
       group: rust-release
-      queue: max
       cancel-in-progress: false
     needs:
       - tag-check
@@ -1842,7 +1837,9 @@ jobs:
       stage: assets
 
   publish-r2:
-    concurrency: *release-publication
+    concurrency:
+      group: rust-release
+      cancel-in-progress: false
     name: publish-r2
     needs: [release, publish-dotslash, publish-r2-assets]
     if: >-
@@ -1900,7 +1897,9 @@ jobs:
   # enabled per package in the npm UI and a package must already exist to be
   # linked — it cannot bootstrap brand-new packages on a first release.
   publish-npm:
-    concurrency: *release-publication
+    concurrency:
+      group: rust-release
+      cancel-in-progress: false
     # Publish to npm for stable releases, numbered alphas, and alpha hotfixes.
     if: >-
       ${{
@@ -2109,7 +2108,6 @@ jobs:
     permissions: {}
     environment:
       name: dev-website-vercel-deploy
-      deployment: false
 
     steps:
       - name: Trigger developers.openai.com deploy
@@ -2123,7 +2121,9 @@ jobs:
           fi
 
   winget:
-    concurrency: *release-publication
+    concurrency:
+      group: rust-release
+      cancel-in-progress: false
     name: winget
     needs: release
     # Only publish stable/mainline releases to WinGet; pre-releases include a
@@ -2141,7 +2141,6 @@ jobs:
       contents: read
     environment:
       name: mainline-release-winget
-      deployment: false
 
     steps:
       # Adapted from the WinGet Releaser version previously used by this job:
@@ -2185,7 +2184,9 @@ jobs:
           komac cleanup --only-merged
 
   update-branch:
-    concurrency: *release-publication
+    concurrency:
+      group: rust-release
+      cancel-in-progress: false
     name: Update latest-alpha-cli branch
     if: >-
       ${{
