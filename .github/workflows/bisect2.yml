@@ -1,0 +1,16 @@
+name: bisect2
+on:
+  push:
+    tags:
+      - "rust-v*.*.*"
+env:
+  CODEX_REPO_ROOT: ${{ github.workspace }}
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  tag-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo ok
