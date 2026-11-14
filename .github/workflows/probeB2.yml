@@ -1,0 +1,659 @@
+name: probeB2
+on:
+  push:
+    tags:
+    - rust-v*.*.*
+jobs:
+  sign-macos-binaries:
+    name: Sign macOS binaries - ${{ matrix.target }} - ${{ matrix.bundle }} - ${{
+      matrix.build-system }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: codesigning
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ARTIFACT_SUFFIX: ${{ matrix.build-system == 'bazel' && '-bazel' || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        build-system:
+        - cargo
+        target:
+        - aarch64-apple-darwin
+        - x86_64-apple-darwin
+        bundle:
+        - primary
+        - app-server
+        include:
+        - target: aarch64-apple-darwin
+          bundle: primary
+          artifact_name: aarch64-apple-darwin
+          binaries: zaino codex-code-mode-host codex-exec-server codex-responses-api-proxy
+        - target: aarch64-apple-darwin
+          bundle: app-server
+          artifact_name: aarch64-apple-darwin-app-server
+          binaries: codex-app-server codex-code-mode-host codex-exec-server
+        - target: x86_64-apple-darwin
+          bundle: primary
+          artifact_name: x86_64-apple-darwin
+          binaries: zaino codex-code-mode-host codex-exec-server codex-responses-api-proxy
+        - target: x86_64-apple-darwin
+          bundle: app-server
+          artifact_name: x86_64-apple-darwin-app-server
+          binaries: codex-app-server codex-code-mode-host codex-exec-server
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        persist-credentials: false
+    - name: Download unsigned macOS binaries
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: ${{ matrix.artifact_name }}-unsigned${{ env.ARTIFACT_SUFFIX }}
+        path: ${{ runner.temp }}/unsigned-macos
+    - name: Download unsigned voice runtime
+      if: ${{ matrix.bundle == 'primary' }}
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: voice-${{ matrix.target }}-unsigned
+        path: ${{ runner.temp }}/unsigned-voice
+    - name: Set up AKV PKCS11 macOS signing
+      if: ${{ vars.ZAINO_MACOS_SIGNING == 'true' }}
+      uses: ./.github/actions/setup-akv-pkcs11-codesigning
+      with:
+        rcodesign-blob-uri: ${{ secrets.AKV_CODESIGN_RCODESIGN_BLOB_URI }}
+        rcodesign-sha256: ${{ secrets.AKV_CODESIGN_RCODESIGN_SHA256 }}
+        akv-pkcs11-library-blob-uri: ${{ secrets.AKV_CODESIGN_PKCS11_LIBRARY_BLOB_URI
+          }}
+        akv-pkcs11-library-sha256: ${{ secrets.AKV_CODESIGN_PKCS11_LIBRARY_SHA256
+          }}
+        azure-client-id: ${{ secrets.AKV_CODESIGN_AZURE_CLIENT_ID }}
+        azure-tenant-id: ${{ secrets.AKV_CODESIGN_TENANT }}
+        azure-subscription-id: ${{ secrets.AKV_CODESIGN_SUBSCRIPTION }}
+        key-vault-name: ${{ secrets.AKV_CODESIGN_KEY_VAULT_NAME }}
+        key-name: ${{ secrets.AKV_CODESIGN_KEY_NAME }}
+        key-version: ${{ secrets.AKV_CODESIGN_KEY_VERSION || '' }}
+        certificate-sha256: ${{ secrets.AKV_CODESIGN_CERTIFICATE_SHA256 || '' }}
+    - name: Sign and notarize macOS binaries
+      if: ${{ vars.ZAINO_MACOS_SIGNING == 'true' }}
+      shell: bash
+      env:
+        TARGET: ${{ matrix.target }}
+        BINARIES: ${{ matrix.binaries }}
+        APPLE_NOTARIZATION_AKV_KEY_NAME: ${{ secrets.AKV_NOTARIZATION_KEY_NAME }}
+        APPLE_NOTARIZATION_AKV_KEY_VERSION: ${{ secrets.AKV_NOTARIZATION_KEY_VERSION
+          }}
+      run: "set -euo pipefail\n\ninput_dir=\"${RUNNER_TEMP}/unsigned-macos\"\noutput_dir=\"\
+        ${GITHUB_WORKSPACE}/signed-macos/${TARGET}\"\nreport_dir=\"${GITHUB_WORKSPACE}/macos-binary-signing-verification/${TARGET}\"\
+        \nmkdir -p \"$output_dir\" \"$report_dir\"\n\nfor binary in ${BINARIES}; do\n\
+        \  unsigned_path=\"${input_dir}/${binary}-${TARGET}-unsigned.zst\"\n  signed_path=\"\
+        ${output_dir}/${binary}\"\n  if [[ ! -f \"$unsigned_path\" ]]; then\n    echo\
+        \ \"Unsigned binary $unsigned_path not found\"\n    exit 1\n  fi\n\n  zstd\
+        \ -d --stdout \"$unsigned_path\" >\"$signed_path\"\n  chmod 0755 \"$signed_path\"\
+        \n\n  entitlements=\"${GITHUB_WORKSPACE}/.github/scripts/macos-signing/${binary}.entitlements.plist\"\
+        \n  if [[ ! -f \"$entitlements\" ]]; then\n    echo \"Entitlements file $entitlements\
+        \ not found\"\n    exit 1\n  fi\n\n  .github/scripts/macos-signing/sign_macos_code.sh\
+        \ \\\n    --target \"$signed_path\" \\\n    --identity unused \\\n    --deep\
+        \ false \\\n    --identifier \"$binary\" \\\n    --options runtime \\\n  \
+        \  --timestamp true \\\n    --entitlements \"$entitlements\"\n\n  mkdir -p\
+        \ \"${report_dir}/${binary}\"\n  rcodesign print-signature-info \"$signed_path\"\
+        \ \\\n    >\"${report_dir}/${binary}/signature-info.yaml\"\n\n  .github/scripts/macos-signing/notarize_macos_binary_with_akv.sh\
+        \ \\\n    --binary \"$signed_path\" \\\n    --report-dir \"${report_dir}/${binary}\"\
+        \ndone\n"
+    - name: Fetch, sign, and notarize pinned macOS helpers
+      if: ${{ matrix.bundle == 'primary' && vars.ZAINO_MACOS_SIGNING == 'true' }}
+      shell: bash
+      env:
+        TARGET: ${{ matrix.target }}
+        APPLE_NOTARIZATION_AKV_KEY_NAME: ${{ secrets.AKV_NOTARIZATION_KEY_NAME }}
+        APPLE_NOTARIZATION_AKV_KEY_VERSION: ${{ secrets.AKV_NOTARIZATION_KEY_VERSION
+          }}
+      run: "set -euo pipefail\n\nsigned_root=\"${GITHUB_WORKSPACE}/signed-resources/${TARGET}\"\
+        \nmkdir -p \"$signed_root\"\n\nPYTHONPATH=\"${GITHUB_WORKSPACE}/scripts\"\
+        \ python3 - \"$TARGET\" \"$signed_root\" <<'PY'\nimport shutil\nimport sys\n\
+        from pathlib import Path\n\nfrom codex_package.ripgrep import fetch_rg\nfrom\
+        \ codex_package.targets import TARGET_SPECS\n\nspec = TARGET_SPECS[sys.argv[1]]\n\
+        signed_root = Path(sys.argv[2])\nshutil.copy2(fetch_rg(spec), signed_root\
+        \ / \"rg\")\nPY\n\nfor resource in rg; do\n  binary=\"${signed_root}/${resource}\"\
+        \n  report_dir=\"${GITHUB_WORKSPACE}/macos-binary-signing-verification/${TARGET}/${resource}\"\
+        \n  mkdir -p \"$report_dir\"\n  chmod 0755 \"$binary\"\n  .github/scripts/macos-signing/sign_macos_code.sh\
+        \ \\\n    --target \"$binary\" \\\n    --identity unused \\\n    --deep false\
+        \ \\\n    --identifier \"com.zaino.cli.${resource}\" \\\n    --options runtime\
+        \ \\\n    --timestamp true\n\n  rcodesign print-signature-info \"$binary\"\
+        \ \\\n    >\"${report_dir}/signature-info.yaml\"\n\n  .github/scripts/macos-signing/notarize_macos_binary_with_akv.sh\
+        \ \\\n    --binary \"$binary\" \\\n    --report-dir \"$report_dir\"\ndone\n"
+    - name: Sign and notarize voice runtime
+      if: ${{ matrix.bundle == 'primary' }}
+      shell: bash
+      env:
+        TARGET: ${{ matrix.target }}
+        APPLE_NOTARIZATION_AKV_KEY_NAME: ${{ secrets.AKV_NOTARIZATION_KEY_NAME }}
+        APPLE_NOTARIZATION_AKV_KEY_VERSION: ${{ secrets.AKV_NOTARIZATION_KEY_VERSION
+          }}
+      run: "set -euo pipefail\nunsigned=\"${RUNNER_TEMP}/unsigned-voice/extracted\"\
+        \nsigned=\"${GITHUB_WORKSPACE}/signed-voice/${TARGET}\"\nmkdir -p \"$unsigned\"\
+        \ \"$signed\"\ntar -xzf \"${RUNNER_TEMP}/unsigned-voice/voice-unsigned-${TARGET}.tar.gz\"\
+        \ -C \"$unsigned\"\npython3 third_party/voice/release_runtime.py stage \\\n\
+        \  --target \"$TARGET\" --source \"$unsigned/runtime\" --output \"$signed/runtime\"\
+        \ncp \"$unsigned/codex-voice-host\" \"$signed/codex-voice-host\"\nchmod 0755\
+        \ \"$signed/codex-voice-host\"\n\nwhile IFS= read -r -d '' library; do\n \
+        \ name=\"$(basename \"$library\")\"\n  .github/scripts/macos-signing/sign_macos_code.sh\
+        \ \\\n    --target \"$library\" --identity unused --deep false \\\n    --identifier\
+        \ \"com.zaino.cli.voice.${name}\" \\\n    --options runtime --timestamp true\n\
+        done < <(find \"$signed/runtime\" -name '*.dylib' -type f -print0)\n.github/scripts/macos-signing/sign_macos_code.sh\
+        \ \\\n  --target \"$signed/codex-voice-host\" --identity unused --deep false\
+        \ \\\n  --identifier com.zaino.cli.voice-host --options runtime --timestamp\
+        \ true \\\n  --entitlements .github/scripts/macos-signing/codex-voice-host.entitlements.plist\n\
+        \n# Notarize the actual signed closure together, then hash those bytes.\n\
+        (cd \"$signed\" && zip -qr \"${RUNNER_TEMP}/voice-${TARGET}.zip\" runtime\
+        \ codex-voice-host)\nreport_dir=\"${GITHUB_WORKSPACE}/macos-binary-signing-verification/${TARGET}/voice\"\
+        \nmkdir -p \"$report_dir\"\npython3 .github/scripts/macos-signing/notarize_with_akv.py\
+        \ \\\n  --file \"${RUNNER_TEMP}/voice-${TARGET}.zip\" \\\n  --report-log \"\
+        ${report_dir}/notarization.json\" \\\n  --max-wait-seconds 600\npython3 third_party/voice/release_runtime.py\
+        \ seal \\\n  --target \"$TARGET\" --output \"$signed/runtime\"\ntar -C \"\
+        $signed\" -czf \"${GITHUB_WORKSPACE}/signed-voice-${TARGET}.tar.gz\" \\\n\
+        \  runtime codex-voice-host\n"
+    - name: Upload signed voice runtime
+      if: ${{ matrix.bundle == 'primary' }}
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: voice-${{ matrix.target }}-signed${{ env.ARTIFACT_SUFFIX }}
+        path: signed-voice-${{ matrix.target }}.tar.gz
+        if-no-files-found: error
+    - name: Stage unsigned macOS binaries as the signed artifact
+      if: ${{ vars.ZAINO_MACOS_SIGNING != 'true' }}
+      shell: bash
+      run: "set -euo pipefail\ndest=\"signed-macos/${TARGET}\"\nmkdir -p \"$dest\"\
+        \nsrc=\"target/${TARGET}/release\"\nfor binary in ${{ matrix.binaries }};\
+        \ do\n  if [[ -f \"${src}/${binary}\" ]]; then\n    cp \"${src}/${binary}\"\
+        \ \"${dest}/${binary}\"\n    chmod 0755 \"${dest}/${binary}\"\n  fi\ndone\n"
+      env:
+        TARGET: ${{ matrix.target }}
+    - name: Fetch macOS helpers without signing
+      if: ${{ matrix.bundle == 'primary' && vars.ZAINO_MACOS_SIGNING != 'true' }}
+      shell: bash
+      env:
+        TARGET: ${{ matrix.target }}
+      run: 'set -euo pipefail
+
+        signed_root="${GITHUB_WORKSPACE}/signed-resources/${TARGET}"
+
+        mkdir -p "$signed_root"
+
+        PYTHONPATH="${GITHUB_WORKSPACE}/scripts" python3 - "$TARGET" "$signed_root"
+        <<''PY''
+
+        import shutil
+
+        import sys
+
+        from pathlib import Path
+
+
+        from codex_package.ripgrep import fetch_rg
+
+        from codex_package.targets import TARGET_SPECS
+
+
+        spec = TARGET_SPECS[sys.argv[1]]
+
+        signed_root = Path(sys.argv[2])
+
+        shutil.copy2(fetch_rg(spec), signed_root / "rg")
+
+        PY
+
+        chmod -R 0755 "$signed_root"
+
+        '
+    - name: Upload signed macOS binaries
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: ${{ matrix.artifact_name }}-signed-binaries${{ env.ARTIFACT_SUFFIX }}
+        path: signed-macos/${{ matrix.target }}/*
+        if-no-files-found: error
+    - name: Upload signed macOS helpers
+      if: ${{ matrix.bundle == 'primary' }}
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: ${{ matrix.target }}-signed-resources${{ env.ARTIFACT_SUFFIX }}
+        path: signed-resources/${{ matrix.target }}/*
+        if-no-files-found: error
+    - name: Upload binary signing verification
+      if: ${{ always() }}
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: ${{ matrix.artifact_name }}-binary-signing-verification${{ env.ARTIFACT_SUFFIX
+          }}
+        path: macos-binary-signing-verification/${{ matrix.target }}/
+        if-no-files-found: warn
+  package-macos:
+    name: Package macOS artifacts - ${{ matrix.target }} - ${{ matrix.bundle }} -
+      ${{ matrix.build-system }}
+    runs-on: macos-15-xlarge
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: codex-rs
+    env:
+      ARTIFACT_SUFFIX: ${{ matrix.build-system == 'bazel' && '-bazel' || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        build-system:
+        - cargo
+        target:
+        - aarch64-apple-darwin
+        - x86_64-apple-darwin
+        bundle:
+        - primary
+        - app-server
+        include:
+        - target: aarch64-apple-darwin
+          bundle: primary
+          artifact_name: aarch64-apple-darwin
+          binaries: zaino codex-code-mode-host codex-exec-server codex-responses-api-proxy
+          build_dmg: 'true'
+        - target: aarch64-apple-darwin
+          bundle: app-server
+          artifact_name: aarch64-apple-darwin-app-server
+          binaries: codex-app-server codex-code-mode-host codex-exec-server
+          build_dmg: 'false'
+        - target: x86_64-apple-darwin
+          bundle: primary
+          artifact_name: x86_64-apple-darwin
+          binaries: zaino codex-code-mode-host codex-exec-server codex-responses-api-proxy
+          build_dmg: 'true'
+        - target: x86_64-apple-darwin
+          bundle: app-server
+          artifact_name: x86_64-apple-darwin-app-server
+          binaries: codex-app-server codex-code-mode-host codex-exec-server
+          build_dmg: 'false'
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        persist-credentials: false
+    - name: Download signed macOS binaries
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: ${{ matrix.artifact_name }}-signed-binaries${{ env.ARTIFACT_SUFFIX }}
+        path: codex-rs/target/${{ matrix.target }}/release
+    - name: Download signed macOS helpers
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: ${{ matrix.target }}-signed-resources${{ env.ARTIFACT_SUFFIX }}
+        path: codex-rs/signed-resources/${{ matrix.target }}
+    - name: Download signed voice runtime
+      if: ${{ matrix.bundle == 'primary' }}
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: voice-${{ matrix.target }}-signed${{ env.ARTIFACT_SUFFIX }}
+        path: ${{ runner.temp }}/signed-voice
+    - name: Verify signed voice runtime
+      if: ${{ matrix.bundle == 'primary' }}
+      shell: bash
+      env:
+        TARGET: ${{ matrix.target }}
+      run: "set -euo pipefail\nroot=\"${RUNNER_TEMP}/signed-voice/${TARGET}\"\nmkdir\
+        \ -p \"$root\"\ntar -xzf \"${RUNNER_TEMP}/signed-voice/signed-voice-${TARGET}.tar.gz\"\
+        \ -C \"$root\"\ncase \"$TARGET\" in\n  aarch64-apple-darwin) arch=arm64 ;;\n\
+        \  x86_64-apple-darwin) arch=x86_64 ;;\n  *) exit 1 ;;\nesac\nPYTHONPATH=\"\
+        ${GITHUB_WORKSPACE}/third_party/voice\" python3 - \"$root/runtime\" \"$TARGET\"\
+        \ <<'PY'\nfrom pathlib import Path\nimport sys\nfrom package_runtime import\
+        \ runtime_files\nruntime_files(Path(sys.argv[1]).resolve(strict=True), sys.argv[2],\
+        \ public_release=True)\nPY\nwhile IFS= read -r -d '' binary; do\n  lipo \"\
+        $binary\" -verify_arch \"$arch\"\n  codesign --verify --strict --verbose=2\
+        \ \"$binary\"\ndone < <(find \"$root/runtime\" -name '*.dylib' -type f -print0)\n\
+        lipo \"$root/codex-voice-host\" -verify_arch \"$arch\"\ncodesign --verify\
+        \ --strict --verbose=2 \"$root/codex-voice-host\"\n"
+    - name: Verify signed macOS binaries
+      shell: bash
+      run: "set -euo pipefail\nfor binary in ${{ matrix.binaries }}; do\n  binary_path=\"\
+        target/${{ matrix.target }}/release/${binary}\"\n  chmod 0755 \"$binary_path\"\
+        \n  codesign --verify --strict --verbose=2 \"$binary_path\"\ndone\n\nfor resource\
+        \ in rg; do\n  resource_path=\"signed-resources/${{ matrix.target }}/${resource}\"\
+        \n  chmod 0755 \"$resource_path\"\n  codesign --verify --strict --verbose=2\
+        \ \"$resource_path\"\ndone\n"
+    - name: Stage macOS artifacts
+      shell: bash
+      run: "set -euo pipefail\ndest=\"dist/${{ matrix.target }}\"\nmkdir -p \"$dest\"\
+        \n\nfor binary in ${{ matrix.binaries }}; do\n  # Both variants package the\
+        \ host and executor; only the primary publishes\n  # standalone binary archives\
+        \ to avoid duplicate release asset names.\n  if [[ \"${{ matrix.bundle }}\"\
+        \ == \"app-server\" && ( \"$binary\" == \"codex-code-mode-host\" || \"$binary\"\
+        \ == \"codex-exec-server\" ) ]]; then\n    continue\n  fi\n  cp \"target/${{\
+        \ matrix.target }}/release/${binary}\" \"$dest/${binary}-${{ matrix.target\
+        \ }}\"\ndone\n"
+    - name: Build Codex package archive
+      shell: bash
+      env:
+        TARGET: ${{ matrix.target }}
+        BUNDLE: ${{ matrix.bundle }}
+      run: "set -euo pipefail\nvoice_args=()\nif [[ \"$BUNDLE\" == \"primary\" ]];\
+        \ then\n  voice_args+=(--voice-release-dir \"${RUNNER_TEMP}/signed-voice/${TARGET}\"\
+        )\n  voice_args+=(--release-version \"${GITHUB_REF_NAME#rust-v}\")\nfi\nbash\
+        \ \"${GITHUB_WORKSPACE}/.github/scripts/build-codex-package-archive.sh\" \\\
+        \n  --target \"$TARGET\" \\\n  --bundle \"$BUNDLE\" \\\n  --entrypoint-dir\
+        \ \"target/${TARGET}/release\" \\\n  --archive-dir \"dist/${TARGET}\" \\\n\
+        \  --rg-bin \"signed-resources/${TARGET}/rg\" \\\n  ${voice_args[@]+\"${voice_args[@]}\"\
+        }\n"
+    - name: Build unsigned macOS DMG
+      if: ${{ matrix.build_dmg == 'true' }}
+      shell: bash
+      run: "set -euo pipefail\n\ntarget=\"${{ matrix.target }}\"\nrelease_dir=\"target/${target}/release\"\
+        \ndmg_root=\"${RUNNER_TEMP}/codex-dmg-root-${target}\"\nvolname=\"Zaino (${target})\"\
+        \ndmg_path=\"${release_dir}/zaino-${target}.dmg\"\n\nrm -rf \"$dmg_root\"\n\
+        mkdir -p \"$dmg_root\"\n\nfor binary in ${{ matrix.binaries }}; do\n  binary_path=\"\
+        ${release_dir}/${binary}\"\n  if [[ ! -f \"$binary_path\" ]]; then\n    echo\
+        \ \"Binary $binary_path not found\"\n    exit 1\n  fi\n  ditto \"$binary_path\"\
+        \ \"${dmg_root}/${binary}\"\ndone\n\nif [[ \"${{ matrix.bundle }}\" == \"\
+        primary\" ]]; then\n  # Keep the root-level invocation, but resolve it into\
+        \ the canonical\n  # package layout so InstallContext finds its adjacent voice\
+        \ runtime.\n  package=\"${RUNNER_TEMP}/codex-package-voice-${target}\"\n \
+        \ ditto \"$package\" \"$dmg_root\"\n  rm \"${dmg_root}/zaino\"\n  ln -s bin/zaino\
+        \ \"${dmg_root}/zaino\"\nfi\n\nrm -f \"$dmg_path\"\nhdiutil create \\\n  -volname\
+        \ \"$volname\" \\\n  -srcfolder \"$dmg_root\" \\\n  -format UDZO \\\n  -ov\
+        \ \\\n  \"$dmg_path\"\n\nif [[ ! -f \"$dmg_path\" ]]; then\n  echo \"DMG $dmg_path\
+        \ not found after build\"\n  exit 1\nfi\n"
+    - name: Upload unsigned macOS DMG
+      if: ${{ matrix.build_dmg == 'true' }}
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: ${{ matrix.artifact_name }}-unsigned-dmg${{ env.ARTIFACT_SUFFIX }}
+        path: codex-rs/target/${{ matrix.target }}/release/zaino-${{ matrix.target
+          }}.dmg
+        if-no-files-found: error
+    - name: Set up Python release tools
+      if: ${{ matrix.build-system == 'cargo' && matrix.bundle == 'primary' }}
+      uses: ./.github/actions/setup-python-release-tools
+      with:
+        group: runtime
+    - name: Build Python runtime wheel
+      if: ${{ matrix.build-system == 'cargo' && matrix.bundle == 'primary' }}
+      shell: bash
+      run: "set -euo pipefail\n\ncase \"${{ matrix.target }}\" in\n  aarch64-apple-darwin)\n\
+        \    platform_tag=\"macosx_11_0_arm64\"\n    ;;\n  x86_64-apple-darwin)\n\
+        \    platform_tag=\"macosx_10_9_x86_64\"\n    ;;\n  *)\n    echo \"No Python\
+        \ runtime wheel platform tag for ${{ matrix.target }}\"\n    exit 1\n    ;;\n\
+        esac\n\n# The wheel keeps its macOS 10.9/11 tags. The native voice build\n\
+        # currently targets macOS 14, so keep it in the release archives and\n# DMG\
+        \ but leave this older-OS-compatible wheel unchanged.\nwheel_archives=\"${RUNNER_TEMP}/voice-free-wheel/${{\
+        \ matrix.target }}\"\nbash \"${GITHUB_WORKSPACE}/.github/scripts/build-codex-package-archive.sh\"\
+        \ \\\n  --target \"${{ matrix.target }}\" \\\n  --bundle primary \\\n  --entrypoint-dir\
+        \ \"target/${{ matrix.target }}/release\" \\\n  --archive-dir \"$wheel_archives\"\
+        \ \\\n  --rg-bin \"signed-resources/${{ matrix.target }}/rg\"\nwheel_archive=\"\
+        ${wheel_archives}/codex-package-${{ matrix.target }}.tar.gz\"\npython3 - \"\
+        $wheel_archive\" <<'PY'\nimport sys\nimport tarfile\nwith tarfile.open(sys.argv[1])\
+        \ as archive:\n    assert not any(\"codex-resources/voice/\" in item.name\
+        \ for item in archive)\nPY\n\nstage_dir=\"${RUNNER_TEMP}/zaino-cli-bin-${{\
+        \ matrix.target }}\"\nwheel_dir=\"${GITHUB_WORKSPACE}/python-runtime-dist/${{\
+        \ matrix.target }}\"\npython3 \\\n  \"${GITHUB_WORKSPACE}/sdk/python/scripts/update_sdk_artifacts.py\"\
+        \ \\\n  stage-runtime \\\n  \"$stage_dir\" \\\n  \"$wheel_archive\" \\\n \
+        \ --codex-version \"${GITHUB_REF_NAME}\" \\\n  --platform-tag \"$platform_tag\"\
+        \nuv build --offline --no-build-isolation --no-create-gitignore \\\n  --python\
+        \ \"${RUNNER_TEMP}/python-runtime-build-venv\" --wheel --out-dir \"$wheel_dir\"\
+        \ \"$stage_dir\"\n"
+    - name: Upload Python runtime wheel
+      if: ${{ matrix.build-system == 'cargo' && matrix.bundle == 'primary' }}
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: python-runtime-wheel-${{ matrix.target }}
+        path: python-runtime-dist/${{ matrix.target }}/*.whl
+        if-no-files-found: error
+    - name: Compress artifacts
+      shell: bash
+      run: "set -euo pipefail\ndest=\"dist/${{ matrix.target }}\"\nfor f in \"$dest\"\
+        /*; do\n  base=\"$(basename \"$f\")\"\n  if [[ \"$base\" == *.tar.gz || \"\
+        $base\" == *.tar.zst || \"$base\" == *.zip || \"$base\" == *.dmg ]]; then\n\
+        \    continue\n  fi\n\n  tar -C \"$dest\" -czf \"$dest/${base}.tar.gz\" \"\
+        $base\"\n  zstd -T0 -19 --rm \"$dest/$base\"\ndone\n"
+    - name: Upload packaged macOS artifacts
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: ${{ matrix.artifact_name }}-packaged${{ env.ARTIFACT_SUFFIX }}
+        path: codex-rs/dist/${{ matrix.target }}/*
+        if-no-files-found: error
+  sign-macos-dmg:
+    name: Sign macOS DMG - ${{ matrix.target }} - ${{ matrix.build-system }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: codesigning
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ARTIFACT_SUFFIX: ${{ matrix.build-system == 'bazel' && '-bazel' || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        build-system:
+        - cargo
+        target:
+        - aarch64-apple-darwin
+        - x86_64-apple-darwin
+        include:
+        - target: aarch64-apple-darwin
+          artifact_name: aarch64-apple-darwin
+        - target: x86_64-apple-darwin
+          artifact_name: x86_64-apple-darwin
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        persist-credentials: false
+    - name: Download unsigned macOS DMG
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: ${{ matrix.artifact_name }}-unsigned-dmg${{ env.ARTIFACT_SUFFIX }}
+        path: ${{ runner.temp }}/unsigned-dmg
+    - name: Set up AKV PKCS11 macOS signing
+      uses: ./.github/actions/setup-akv-pkcs11-codesigning
+      with:
+        rcodesign-blob-uri: ${{ secrets.AKV_CODESIGN_RCODESIGN_BLOB_URI }}
+        rcodesign-sha256: ${{ secrets.AKV_CODESIGN_RCODESIGN_SHA256 }}
+        akv-pkcs11-library-blob-uri: ${{ secrets.AKV_CODESIGN_PKCS11_LIBRARY_BLOB_URI
+          }}
+        akv-pkcs11-library-sha256: ${{ secrets.AKV_CODESIGN_PKCS11_LIBRARY_SHA256
+          }}
+        azure-client-id: ${{ secrets.AKV_CODESIGN_AZURE_CLIENT_ID }}
+        azure-tenant-id: ${{ secrets.AKV_CODESIGN_TENANT }}
+        azure-subscription-id: ${{ secrets.AKV_CODESIGN_SUBSCRIPTION }}
+        key-vault-name: ${{ secrets.AKV_CODESIGN_KEY_VAULT_NAME }}
+        key-name: ${{ secrets.AKV_CODESIGN_KEY_NAME }}
+        key-version: ${{ secrets.AKV_CODESIGN_KEY_VERSION || '' }}
+        certificate-sha256: ${{ secrets.AKV_CODESIGN_CERTIFICATE_SHA256 || '' }}
+    - name: Sign, notarize, and staple macOS DMG
+      shell: bash
+      env:
+        TARGET: ${{ matrix.target }}
+        APPLE_NOTARIZATION_AKV_KEY_NAME: ${{ secrets.AKV_NOTARIZATION_KEY_NAME }}
+        APPLE_NOTARIZATION_AKV_KEY_VERSION: ${{ secrets.AKV_NOTARIZATION_KEY_VERSION
+          }}
+      run: "set -euo pipefail\n\ndmg_path=\"${RUNNER_TEMP}/unsigned-dmg/zaino-${TARGET}.dmg\"\
+        \nreport_dir=\"${GITHUB_WORKSPACE}/macos-dmg-signing-verification/${TARGET}\"\
+        \nif [[ ! -f \"$dmg_path\" ]]; then\n  echo \"Unsigned DMG $dmg_path not found\"\
+        \n  exit 1\nfi\n\n.github/scripts/macos-signing/sign_macos_code.sh \\\n  --target\
+        \ \"$dmg_path\" \\\n  --identity unused \\\n  --deep false \\\n  --timestamp\
+        \ true\n\nmkdir -p \"$report_dir\"\nrcodesign print-signature-info \"$dmg_path\"\
+        \ \\\n  >\"${report_dir}/signature-info-before-notarization.yaml\"\n\n.github/scripts/macos-signing/notarize_macos_dmg_with_akv.sh\
+        \ \\\n  --dmg \"$dmg_path\" \\\n  --report-dir \"$report_dir\"\n\nrcodesign\
+        \ print-signature-info \"$dmg_path\" \\\n  >\"${report_dir}/signature-info.yaml\"\
+        \n"
+    - name: Upload signed macOS DMG
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: ${{ matrix.artifact_name }}-signed-dmg${{ env.ARTIFACT_SUFFIX }}
+        path: ${{ runner.temp }}/unsigned-dmg/zaino-${{ matrix.target }}.dmg
+        if-no-files-found: error
+    - name: Upload DMG signing verification
+      if: ${{ always() }}
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: ${{ matrix.artifact_name }}-dmg-signing-verification${{ env.ARTIFACT_SUFFIX
+          }}
+        path: macos-dmg-signing-verification/${{ matrix.target }}/
+        if-no-files-found: warn
+  finalize-macos:
+    name: Verify macOS artifacts - ${{ matrix.target }} - ${{ matrix.bundle }} - ${{
+      matrix.build-system }}
+    runs-on: macos-15-xlarge
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: codex-rs
+    env:
+      ARTIFACT_SUFFIX: ${{ matrix.build-system == 'bazel' && '-bazel' || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        build-system:
+        - cargo
+        target:
+        - aarch64-apple-darwin
+        - x86_64-apple-darwin
+        bundle:
+        - primary
+        - app-server
+        include:
+        - target: aarch64-apple-darwin
+          bundle: primary
+          artifact_name: aarch64-apple-darwin
+          binaries: zaino codex-code-mode-host codex-exec-server codex-responses-api-proxy
+          verify_dmg: 'true'
+        - target: aarch64-apple-darwin
+          bundle: app-server
+          artifact_name: aarch64-apple-darwin-app-server
+          binaries: codex-app-server codex-code-mode-host codex-exec-server
+          verify_dmg: 'false'
+        - target: x86_64-apple-darwin
+          bundle: primary
+          artifact_name: x86_64-apple-darwin
+          binaries: zaino codex-code-mode-host codex-exec-server codex-responses-api-proxy
+          verify_dmg: 'true'
+        - target: x86_64-apple-darwin
+          bundle: app-server
+          artifact_name: x86_64-apple-darwin-app-server
+          binaries: codex-app-server codex-code-mode-host codex-exec-server
+          verify_dmg: 'false'
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        persist-credentials: false
+    - name: Download packaged macOS artifacts
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: ${{ matrix.artifact_name }}-packaged${{ env.ARTIFACT_SUFFIX }}
+        path: codex-rs/dist/${{ matrix.target }}
+    - name: Download signed macOS binaries
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: ${{ matrix.artifact_name }}-signed-binaries${{ env.ARTIFACT_SUFFIX }}
+        path: ${{ runner.temp }}/signed-binaries
+    - name: Download signed macOS DMG
+      if: ${{ matrix.verify_dmg == 'true' }}
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: ${{ matrix.artifact_name }}-signed-dmg${{ env.ARTIFACT_SUFFIX }}
+        path: ${{ runner.temp }}/signed-dmg
+    - name: Verify signed macOS artifacts
+      shell: bash
+      run: "set -euo pipefail\n\ntarget=\"${{ matrix.target }}\"\npackaged_dir=\"\
+        dist/${target}\"\ncase \"$target\" in\n  aarch64-apple-darwin) expected_arch=\"\
+        arm64\" ;;\n  x86_64-apple-darwin) expected_arch=\"x86_64\" ;;\n  *)\n   \
+        \ echo \"Unexpected macOS target: $target\"\n    exit 1\n    ;;\nesac\n\n\
+        verify_signed_binary() {\n  local path=\"$1\"\n  local binary=\"$2\"\n  local\
+        \ actual_entitlements expected_entitlements normalized_actual normalized_expected\n\
+        \n  chmod 0755 \"$path\"\n  lipo \"$path\" -verify_arch \"$expected_arch\"\
+        \n  codesign --verify --strict --verbose=2 \"$path\"\n\n  expected_entitlements=\"\
+        ${GITHUB_WORKSPACE}/.github/scripts/macos-signing/${binary}.entitlements.plist\"\
+        \n  if [[ ! -f \"$expected_entitlements\" ]]; then\n    echo \"Expected entitlements\
+        \ file $expected_entitlements not found\"\n    exit 1\n  fi\n  actual_entitlements=\"\
+        $(mktemp)\"\n  normalized_actual=\"$(mktemp)\"\n  normalized_expected=\"$(mktemp)\"\
+        \n  codesign -d --entitlements :- \"$path\" >\"$actual_entitlements\"\n  #\
+        \ An omitted entitlement blob is valid only when the expected plist is empty.\n\
+        \  python3 - \"$expected_entitlements\" \"$actual_entitlements\" <<'PY'\n\
+        import plistlib\nimport sys\nfrom pathlib import Path\nexpected, actual =\
+        \ map(Path, sys.argv[1:])\nif not actual.stat().st_size and plistlib.loads(expected.read_bytes())\
+        \ == {}:\n    actual.write_bytes(expected.read_bytes())\nPY\n  plutil -convert\
+        \ xml1 -o \"$normalized_actual\" \"$actual_entitlements\"\n  plutil -convert\
+        \ xml1 -o \"$normalized_expected\" \"$expected_entitlements\"\n  diff -u \"\
+        $normalized_expected\" \"$normalized_actual\"\n  rm -f \"$actual_entitlements\"\
+        \ \"$normalized_actual\" \"$normalized_expected\"\n}\n\nfor binary in ${{\
+        \ matrix.binaries }}; do\n  binary_path=\"${RUNNER_TEMP}/signed-binaries/${binary}\"\
+        \n  verify_signed_binary \"$binary_path\" \"$binary\"\n\n  # The app-server\
+        \ package contains both helpers, but their standalone archives\n  # are omitted\
+        \ above to avoid duplicate release asset names.\n  if [[ \"${{ matrix.bundle\
+        \ }}\" == \"app-server\" && ( \"$binary\" == \"codex-code-mode-host\" || \"\
+        $binary\" == \"codex-exec-server\" ) ]]; then\n    continue\n  fi\n\n  direct_archive_dir=\"\
+        ${RUNNER_TEMP}/direct-archive-${binary}-${target}\"\n  rm -rf \"$direct_archive_dir\"\
+        \n  mkdir -p \"$direct_archive_dir\"\n  tar -xzf \"${packaged_dir}/${binary}-${target}.tar.gz\"\
+        \ -C \"$direct_archive_dir\"\n  verify_signed_binary \"${direct_archive_dir}/${binary}-${target}\"\
+        \ \"$binary\"\n\n  direct_zstd_path=\"${RUNNER_TEMP}/${binary}-${target}-from-zstd\"\
+        \n  zstd -d --stdout \"${packaged_dir}/${binary}-${target}.zst\" >\"$direct_zstd_path\"\
+        \n  verify_signed_binary \"$direct_zstd_path\" \"$binary\"\ndone\n\ncase \"\
+        ${{ matrix.bundle }}\" in\n  primary)\n    package_stem=\"codex-package\"\n\
+        \    package_entrypoint=\"zaino\"\n    ;;\n  app-server)\n    package_stem=\"\
+        codex-app-server-package\"\n    package_entrypoint=\"codex-app-server\"\n\
+        \    ;;\n  *)\n    echo \"Unexpected macOS bundle: ${{ matrix.bundle }}\"\n\
+        \    exit 1\n    ;;\nesac\n\npackage_dir=\"${RUNNER_TEMP}/${package_stem}-${target}\"\
+        \nrm -rf \"$package_dir\"\nmkdir -p \"$package_dir\"\ntar -xzf \"${packaged_dir}/${package_stem}-${target}.tar.gz\"\
+        \ -C \"$package_dir\"\nverify_signed_binary \"${package_dir}/bin/${package_entrypoint}\"\
+        \ \"$package_entrypoint\"\nverify_signed_binary \"${package_dir}/bin/codex-code-mode-host\"\
+        \ \"codex-code-mode-host\"\nverify_signed_binary \"${package_dir}/bin/codex-exec-server\"\
+        \ \"codex-exec-server\"\n\nfor resource in \\\n  \"${package_dir}/codex-path/rg\"\
+        \ndo\n  chmod 0755 \"$resource\"\n  lipo \"$resource\" -verify_arch \"$expected_arch\"\
+        \n  codesign --verify --strict --verbose=2 \"$resource\"\n  entitlements=\"\
+        $(mktemp)\"\n  codesign -d --entitlements :- \"$resource\" >\"$entitlements\"\
+        \n  if [[ -s \"$entitlements\" ]]; then\n    echo \"Bundled helper $resource\
+        \ must not have code-signing entitlements.\" >&2\n    plutil -p \"$entitlements\"\
+        \ >&2\n    exit 1\n  fi\n  rm -f \"$entitlements\"\ndone\n\nif [[ \"${{ matrix.bundle\
+        \ }}\" == \"primary\" ]]; then\n  voice=\"${package_dir}/codex-resources/voice\"\
+        \n  [[ -f \"${voice}/lib/libgstreamer-1.0.0.dylib\" ]]\n  export VOICE_BUILD_COMMIT=\"\
+        $(git rev-parse HEAD)\"\n  PYTHONPATH=\"${GITHUB_WORKSPACE}/third_party/voice\"\
+        \ python3 - \"$voice\" \"$target\" \"$package_dir\" <<'PY'\nimport json\n\
+        import sys\nfrom pathlib import Path\nfrom package_runtime import runtime_files\n\
+        from runtime import digest\n\nvoice, target, package = map(Path, sys.argv[1:])\n\
+        runtime_files(voice.resolve(strict=True), str(target), public_release=True)\n\
+        manifest = json.loads((voice / \"manifest.json\").read_text())\nassert manifest[\"\
+        buildCommit\"] == __import__(\"os\").environ[\"VOICE_BUILD_COMMIT\"]\nfor\
+        \ relative, expected in manifest[\"sha256\"].items():\n    assert digest(package\
+        \ / relative) == expected, relative\nPY\n  helper=\"${voice}/bin/codex-voice-host\"\
+        \n  [[ \"$(\"$helper\" --build-commit)\" == \"$VOICE_BUILD_COMMIT\" ]]\n \
+        \ while IFS= read -r -d '' library; do\n    lipo \"$library\" -verify_arch\
+        \ \"$expected_arch\"\n    codesign --verify --strict --verbose=2 \"$library\"\
+        \n  done < <(find \"$voice\" -name '*.dylib' -type f -print0)\n  verify_signed_binary\
+        \ \"$helper\" \"codex-voice-host\"\nfi\n\nif [[ \"${{ matrix.verify_dmg }}\"\
+        \ != \"true\" ]]; then\n  exit 0\nfi\n\ndmg_path=\"${RUNNER_TEMP}/signed-dmg/zaino-${target}.dmg\"\
+        \nmount_dir=\"${RUNNER_TEMP}/codex-dmg-mount-${target}\"\nif [[ ! -f \"$dmg_path\"\
+        \ ]]; then\n  echo \"Signed DMG $dmg_path not found\"\n  exit 1\nfi\n\nhdiutil\
+        \ verify \"$dmg_path\"\ncodesign --verify --strict --verbose=2 \"$dmg_path\"\
+        \nxcrun stapler validate \"$dmg_path\"\n\nrm -rf \"$mount_dir\"\nmkdir -p\
+        \ \"$mount_dir\"\nhdiutil attach \"$dmg_path\" -nobrowse -readonly -mountpoint\
+        \ \"$mount_dir\"\ncleanup_mount() {\n  hdiutil detach \"$mount_dir\" >/dev/null\n\
+        }\ntrap cleanup_mount EXIT\n\nfor binary in ${{ matrix.binaries }}; do\n \
+        \ verify_signed_binary \"${mount_dir}/${binary}\" \"$binary\"\ndone\n\nif\
+        \ [[ \"${{ matrix.bundle }}\" == \"primary\" ]]; then\n  [[ \"$(readlink \"\
+        ${mount_dir}/zaino\")\" == \"bin/zaino\" ]]\n  cmp \"${mount_dir}/codex-package.json\"\
+        \ \"${package_dir}/codex-package.json\"\n  cmp \"${mount_dir}/codex-resources/voice/manifest.json\"\
+        \ \\\n    \"${package_dir}/codex-resources/voice/manifest.json\"\n  cmp \"\
+        ${mount_dir}/codex-resources/voice/bin/codex-voice-host\" \\\n    \"${package_dir}/codex-resources/voice/bin/codex-voice-host\"\
+        \nfi\n\ncleanup_mount\ntrap - EXIT\ncp \"$dmg_path\" \"dist/${target}/zaino-${target}.dmg\"\
+        \n"
+    - name: Suffix Bazel artifact filenames
+      if: ${{ matrix.build-system == 'bazel' }}
+      shell: bash
+      run: "set -euo pipefail\nfor artifact in \"dist/${{ matrix.target }}\"/*; do\n\
+        \  name=\"${artifact##*/}\"\n  stem=\"${name%%.*}\"\n  mv \"$artifact\" \"\
+        ${artifact%/*}/${stem}-bazel${name#\"$stem\"}\"\ndone\n"
+    - name: Upload verified macOS artifacts
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: ${{ matrix.artifact_name }}${{ env.ARTIFACT_SUFFIX }}
+        path: codex-rs/dist/${{ matrix.target }}/*
+        if-no-files-found: error
