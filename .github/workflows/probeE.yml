@@ -1,13 +1,8 @@
-name: probeA
-true:
+name: probeE
+'on':
   push:
     tags:
     - rust-v*.*.*
-env:
-  CODEX_REPO_ROOT: ${{ github.workspace }}
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
 jobs:
   tag-check:
     runs-on: ubuntu-latest
@@ -30,8 +25,7 @@ jobs:
         \ ${cargo_ver}\"; exit 1; }\n\necho \"\u2705  Tag and Cargo.toml agree (${tag_ver})\"\
         \necho \"::endgroup::\"\n"
   build:
-    needs:
-    - tag-check
+    needs: tag-check
     name: Build - ${{ matrix.runner }} - ${{ matrix.target }} - ${{ matrix.bundle
       }} - ${{ matrix.build-system }}
     runs-on: ${{ matrix.runner }}
@@ -444,8 +438,7 @@ jobs:
 
           '
   build-macos-voice:
-    needs:
-    - tag-check
+    needs: tag-check
     name: Build voice runtime - ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
     environment:
@@ -730,8 +723,7 @@ jobs:
         path: macos-binary-signing-verification/${{ matrix.target }}/
         if-no-files-found: warn
   package-macos:
-    needs:
-    - sign-macos-binaries
+    needs: sign-macos-binaries
     name: Package macOS artifacts - ${{ matrix.target }} - ${{ matrix.bundle }} -
       ${{ matrix.build-system }}
     runs-on: macos-15-xlarge
@@ -920,8 +912,7 @@ jobs:
         path: codex-rs/dist/${{ matrix.target }}/*
         if-no-files-found: error
   sign-macos-dmg:
-    needs:
-    - package-macos
+    needs: package-macos
     name: Sign macOS DMG - ${{ matrix.target }} - ${{ matrix.build-system }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -1164,10 +1155,30 @@ jobs:
         name: ${{ matrix.artifact_name }}${{ env.ARTIFACT_SUFFIX }}
         path: codex-rs/dist/${{ matrix.target }}/*
         if-no-files-found: error
+  provisioned-macos-candidate:
+    needs: finalize-macos
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/rust-v')
+      && vars.CODEX_PROVISIONED_MACOS_CANDIDATE == 'true'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/rust-release-provisioned-macos.yml
+    secrets: inherit
+  build-windows:
+    needs: tag-check
+    uses: ./.github/workflows/rust-release-windows.yml
+    secrets: inherit
+  argument-comment-lint-release-assets:
+    name: argument-comment-lint release assets
+    needs: tag-check
+    uses: ./.github/workflows/rust-release-argument-comment-lint.yml
+    with:
+      publish: true
   stage-npm-packages:
     name: stage npm packages
     needs:
     - build
+    - build-windows
     if: "${{\n  !cancelled() &&\n  needs.build.result == 'success' &&\n  needs.build-windows.result\
       \ == 'success'\n}}"
     runs-on: ubuntu-latest
@@ -1212,7 +1223,10 @@ jobs:
     - tag-check
     - build
     - finalize-macos
+    - build-windows
+    - argument-comment-lint-release-assets
     - stage-npm-packages
+    - provisioned-macos-candidate
     if: "${{\n  always() &&\n  needs.tag-check.result == 'success' &&\n  needs.build.result\
       \ == 'success' &&\n  needs.build-windows.result == 'success' &&\n  needs.argument-comment-lint-release-assets.result\
       \ == 'success' &&\n  needs.stage-npm-packages.result == 'success' &&\n  needs.finalize-macos.result\
@@ -1307,10 +1321,43 @@ jobs:
         MAKE_LATEST: ${{ steps.release_name.outputs.make_latest }}
         PRERELEASE: ${{ steps.release_name.outputs.prerelease }}
       run: bash .github/scripts/publish-github-release.sh
-  publish-dotslash:
-    name: publish-dotslash
+  publish-r2-assets:
+    name: publish-r2-assets
+    needs: release
+    if: ${{ !cancelled() && needs.release.result == 'success' && vars.ZAINO_PUBLISH_R2
+      == 'true' }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/r2-release.yml
+    secrets: inherit
+    with:
+      tag: ${{ needs.release.outputs.tag }}
+      make_latest: ${{ fromJSON(needs.release.outputs.make_latest) }}
+      prerelease: ${{ fromJSON(needs.release.outputs.prerelease) }}
+      stage: assets
+  publish-r2:
+    concurrency:
+      group: rust-release
+      cancel-in-progress: false
+    name: publish-r2
     needs:
     - release
+    - publish-dotslash
+    - publish-r2-assets
+    if: "${{\n  !cancelled() &&\n  needs.release.result == 'success' &&\n  needs.publish-dotslash.result\
+      \ == 'success' &&\n  needs.publish-r2-assets.result == 'success'\n}}"
+    permissions:
+      contents: read
+    uses: ./.github/workflows/r2-release.yml
+    secrets: inherit
+    with:
+      tag: ${{ needs.release.outputs.tag }}
+      make_latest: ${{ fromJSON(needs.release.outputs.make_latest) }}
+      prerelease: ${{ fromJSON(needs.release.outputs.prerelease) }}
+      stage: finalize
+  publish-dotslash:
+    name: publish-dotslash
+    needs: release
     if: ${{ !cancelled() && needs.release.result == 'success' && vars.ZAINO_PUBLISH_DOTSLASH
       == 'true' }}
     runs-on: ubuntu-latest
@@ -1345,8 +1392,7 @@ jobs:
     if: "${{\n  !cancelled() &&\n  needs.release.result == 'success' &&\n  needs.release.outputs.should_publish_npm\
       \ == 'true'\n}}"
     name: publish-npm
-    needs:
-    - release
+    needs: release
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1443,8 +1489,7 @@ jobs:
         retention-days: 7
   deploy-dev-website:
     name: Trigger developers site deploy
-    needs:
-    - release
+    needs: release
     if: false
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -1465,8 +1510,7 @@ jobs:
       group: rust-release
       cancel-in-progress: false
     name: winget
-    needs:
-    - release
+    needs: release
     if: "${{\n  !cancelled() &&\n  needs.release.result == 'success' &&\n  !contains(needs.release.outputs.version,\
       \ '-')\n}}"
     runs-on: ubuntu-latest
@@ -1516,6 +1560,7 @@ jobs:
       contents: write
     needs:
     - release
+    - publish-r2
     - publish-npm
     runs-on: ubuntu-latest
     steps:
