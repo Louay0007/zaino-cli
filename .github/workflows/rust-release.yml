@@ -695,7 +695,7 @@ jobs:
       # builds ship unsigned (Gatekeeper warns on first run) rather than
       # failing the whole release. Set the AKV_CODESIGN_* secrets to enable it.
       - name: Set up AKV PKCS11 macOS signing
-        if: ${{ secrets.AKV_CODESIGN_KEY_VAULT_NAME != '' }}
+        if: ${{ vars.ZAINO_MACOS_SIGNING == 'true' }}
         uses: ./.github/actions/setup-akv-pkcs11-codesigning
         with:
           rcodesign-blob-uri: ${{ secrets.AKV_CODESIGN_RCODESIGN_BLOB_URI }}
@@ -711,7 +711,7 @@ jobs:
           certificate-sha256: ${{ secrets.AKV_CODESIGN_CERTIFICATE_SHA256 || '' }}
 
       - name: Sign and notarize macOS binaries
-        if: ${{ secrets.AKV_CODESIGN_KEY_VAULT_NAME != '' }}
+        if: ${{ vars.ZAINO_MACOS_SIGNING == 'true' }}
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
@@ -762,7 +762,7 @@ jobs:
           done
 
       - name: Fetch, sign, and notarize pinned macOS helpers
-        if: ${{ matrix.bundle == 'primary' && secrets.AKV_CODESIGN_KEY_VAULT_NAME != '' }}
+        if: ${{ matrix.bundle == 'primary' && vars.ZAINO_MACOS_SIGNING == 'true' }}
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
@@ -862,7 +862,7 @@ jobs:
       # Unsigned when the AKV secrets are absent: fall back to the binaries as
       # cargo produced them so a release without signing still ships.
       - name: Stage unsigned macOS binaries as the signed artifact
-        if: ${{ secrets.AKV_CODESIGN_KEY_VAULT_NAME == '' }}
+        if: ${{ vars.ZAINO_MACOS_SIGNING != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -879,7 +879,7 @@ jobs:
           TARGET: ${{ matrix.target }}
 
       - name: Fetch macOS helpers without signing
-        if: ${{ matrix.bundle == 'primary' && secrets.AKV_CODESIGN_KEY_VAULT_NAME == '' }}
+        if: ${{ matrix.bundle == 'primary' && vars.ZAINO_MACOS_SIGNING != 'true' }}
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
@@ -1828,7 +1828,9 @@ jobs:
   publish-r2-assets:
     name: publish-r2-assets
     needs: release
-    if: ${{ !cancelled() && needs.release.result == 'success' }}
+    # Requires Cloudflare R2 credentials. Skipped rather than failed when they
+    # are absent, so a release without R2 still succeeds for GitHub + npm.
+    if: ${{ !cancelled() && needs.release.result == 'success' && vars.ZAINO_PUBLISH_R2 == 'true' }}
     permissions:
       contents: read
     uses: ./.github/workflows/r2-release.yml
@@ -1863,7 +1865,9 @@ jobs:
   publish-dotslash:
     name: publish-dotslash
     needs: release
-    if: ${{ !cancelled() && needs.release.result == 'success' }}
+    # The DotSlash publisher pushes manifests to the release; harmless to skip
+    # until the release tooling is set up for this repository.
+    if: ${{ !cancelled() && needs.release.result == 'success' && vars.ZAINO_PUBLISH_DOTSLASH == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
