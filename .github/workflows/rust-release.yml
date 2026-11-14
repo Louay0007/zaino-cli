@@ -2103,7 +2103,7 @@ jobs:
     # Disabled: this step POSTs to OpenAI's own developer-site deploy hook,
     # which Zaino has no counterpart for. Set a deploy hook secret and drop
     # this condition to re-enable it for a Zaino site.
-    if: ${{ false }}
+    if: false
     runs-on: ubuntu-latest
     continue-on-error: true
     permissions: {}
