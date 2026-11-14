@@ -7,7 +7,16 @@
 
 ### Installing and running Zaino CLI
 
-Build from source (the npm package is not published yet):
+```shell
+npm install -g zainocli
+```
+
+The package is published as `zainocli` — `zaino` is a reserved name on npm.
+The platform binary arrives as an optional dependency (`zainocli-darwin-arm64`,
+`zainocli-linux-x64`, …), so the install only downloads the one for your
+machine.
+
+If your platform has no published binary yet, build from source:
 
 ```shell
 git clone https://github.com/Louay0007/zaino-cli.git
