@@ -4,8 +4,9 @@ name: blocking-ci
 # after pushes to main so the same check family stays grouped in the Actions UI.
 on:
   pull_request: {}
-  push:
-    branches: [main]
+  # Push-to-main disabled: this workflow fans out to many jobs and starves the
+  # account's concurrent-job budget. Re-enable when CI capacity allows.
+  workflow_dispatch: {}
 
 jobs:
   # Keep reusable workflow calls alphabetized. The `required` job below is the
