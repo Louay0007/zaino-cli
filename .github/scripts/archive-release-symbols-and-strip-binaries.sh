@@ -73,12 +73,14 @@ case "$target" in
         echo "Binary $binary_path not found" >&2
         exit 1
       fi
-      if [[ ! -d "$dsym_path" ]]; then
-        echo "dSYM $dsym_path not found" >&2
-        exit 1
+      # No dSYM is expected when the release profile ships without debug info
+      # (`debug = "none"`). Archive it when present and carry on when absent,
+      # rather than failing the whole build over a symbol bundle.
+      if [[ -d "$dsym_path" ]]; then
+        cp -RL "$dsym_path" "${symbols_dir}/${binary}.dSYM"
+      else
+        echo "no dSYM for ${binary} (built without debug info); continuing" >&2
       fi
-
-      cp -RL "$dsym_path" "${symbols_dir}/${binary}.dSYM"
       strip -S -x "$binary_path"
     done
     ;;
