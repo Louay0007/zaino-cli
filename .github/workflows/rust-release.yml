@@ -9,7 +9,7 @@
 # GitHub environment and Azure Key Vault before final verification on macOS.
 
 name: rust-release
-'on':
+on:
   push:
     tags:
       - "rust-v*.*.*"
