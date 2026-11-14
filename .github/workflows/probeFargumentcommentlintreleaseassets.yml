@@ -1,0 +1,1526 @@
+name: probeFargumentcommentlintreleaseassets
+'on':
+  push:
+    tags:
+    - rust-v*.*.*
+jobs:
+  tag-check:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        persist-credentials: false
+    - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
+    - name: Validate tag matches Cargo.toml version
+      shell: bash
+      run: "set -euo pipefail\necho \"::group::Tag validation\"\n\n# Release runs\
+        \ must come from a tag.\n[[ \"${GITHUB_REF_TYPE}\" == \"tag\" ]] \\\n  ||\
+        \ { echo \"\u274C  Not a tag ref\"; exit 1; }\n\ntag_ver=\"${GITHUB_REF_NAME#rust-v}\"\
+        \n[[ \"${GITHUB_REF_NAME}\" == rust-v* ]] \\\n  && python3 .github/scripts/releases.py\
+        \ \"${tag_ver}\" \\\n  || { echo \"\u274C  Tag '${GITHUB_REF_NAME}' doesn't\
+        \ match expected format\"; exit 1; }\n\n# Release tags must match the version\
+        \ in Cargo.toml.\ncargo_ver=\"$(grep -m1 '^version' codex-rs/Cargo.toml \\\
+        \n              | sed -E 's/version *= *\"([^\"]+)\".*/\\1/')\"\n\n[[ \"${tag_ver}\"\
+        \ == \"${cargo_ver}\" ]] \\\n  || { echo \"\u274C  Tag ${tag_ver} \u2260 Cargo.toml\
+        \ ${cargo_ver}\"; exit 1; }\n\necho \"\u2705  Tag and Cargo.toml agree (${tag_ver})\"\
+        \necho \"::endgroup::\"\n"
+  build:
+    needs:
+    - tag-check
+    name: Build - ${{ matrix.runner }} - ${{ matrix.target }} - ${{ matrix.bundle
+      }} - ${{ matrix.build-system }}
+    runs-on: ${{ matrix.runner }}
+    environment:
+      name: bazel
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: codex-rs
+    env:
+      ARTIFACT_SUFFIX: ${{ matrix.build-system == 'bazel' && '-bazel' || '' }}
+      CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: ${{ contains(matrix.target, 'apple-darwin')
+        && 'packed' || 'off' }}
+      CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        build-system:
+        - cargo
+        target:
+        - aarch64-apple-darwin
+        - x86_64-apple-darwin
+        - x86_64-unknown-linux-musl
+        - aarch64-unknown-linux-musl
+        bundle:
+        - primary
+        - app-server
+        include:
+        - runner: macos-15-xlarge
+          target: aarch64-apple-darwin
+          bundle: primary
+          artifact_name: aarch64-apple-darwin
+          binaries: zaino codex-code-mode-host codex-exec-server codex-responses-api-proxy
+          build_dmg: 'true'
+        - runner: macos-15-xlarge
+          target: aarch64-apple-darwin
+          bundle: app-server
+          artifact_name: aarch64-apple-darwin-app-server
+          binaries: codex-app-server codex-code-mode-host codex-exec-server
+          build_dmg: 'false'
+        - runner: macos-15-xlarge
+          target: x86_64-apple-darwin
+          bundle: primary
+          artifact_name: x86_64-apple-darwin
+          binaries: zaino codex-code-mode-host codex-exec-server codex-responses-api-proxy
+          build_dmg: 'true'
+        - runner: macos-15-xlarge
+          target: x86_64-apple-darwin
+          bundle: app-server
+          artifact_name: x86_64-apple-darwin-app-server
+          binaries: codex-app-server codex-code-mode-host codex-exec-server
+          build_dmg: 'false'
+        - runner: ${{ github.event.repository.name }}-linux-x64-xl
+          target: x86_64-unknown-linux-musl
+          bundle: primary
+          artifact_name: x86_64-unknown-linux-musl
+          binaries: zaino codex-code-mode-host codex-exec-server codex-responses-api-proxy
+            bwrap
+          build_dmg: 'false'
+        - runner: ${{ github.event.repository.name }}-linux-x64-xl
+          target: x86_64-unknown-linux-musl
+          bundle: app-server
+          artifact_name: x86_64-unknown-linux-musl-app-server
+          binaries: codex-app-server codex-code-mode-host codex-exec-server
+          build_dmg: 'false'
+        - runner: ${{ github.event.repository.name }}-linux-arm64
+          target: aarch64-unknown-linux-musl
+          bundle: primary
+          artifact_name: aarch64-unknown-linux-musl
+          binaries: zaino codex-code-mode-host codex-exec-server codex-responses-api-proxy
+            bwrap
+          build_dmg: 'false'
+        - runner: ${{ github.event.repository.name }}-linux-arm64
+          target: aarch64-unknown-linux-musl
+          bundle: app-server
+          artifact_name: aarch64-unknown-linux-musl-app-server
+          binaries: codex-app-server codex-code-mode-host codex-exec-server
+          build_dmg: 'false'
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        persist-credentials: false
+    - name: Print runner specs (Linux)
+      if: ${{ runner.os == 'Linux' }}
+      shell: bash
+      run: 'set -euo pipefail
+
+        cpu_model="$(lscpu | awk -F: ''/Model name/ {gsub(/^[ \t]+/, "", $2); print
+        $2; exit}'')"
+
+        total_ram="$(awk ''/MemTotal/ {printf "%.1f GiB\n", $2 / 1024 / 1024}'' /proc/meminfo)"
+
+        echo "Runner: ${RUNNER_NAME:-unknown}"
+
+        echo "OS: $(uname -a)"
+
+        echo "CPU model: ${cpu_model}"
+
+        echo "Logical CPUs: $(nproc)"
+
+        echo "Total RAM: ${total_ram}"
+
+        echo "Disk usage:"
+
+        df -h .
+
+        '
+    - name: Print runner specs (macOS)
+      if: ${{ runner.os == 'macOS' }}
+      shell: bash
+      run: 'set -euo pipefail
+
+        total_ram="$(sysctl -n hw.memsize | awk ''{printf "%.1f GiB\n", $1 / 1024
+        / 1024 / 1024}'')"
+
+        echo "Runner: ${RUNNER_NAME:-unknown}"
+
+        echo "OS: $(sw_vers -productName) $(sw_vers -productVersion)"
+
+        echo "Hardware model: $(sysctl -n hw.model)"
+
+        echo "CPU architecture: $(uname -m)"
+
+        echo "Logical CPUs: $(sysctl -n hw.logicalcpu)"
+
+        echo "Physical CPUs: $(sysctl -n hw.physicalcpu)"
+
+        echo "Total RAM: ${total_ram}"
+
+        echo "Disk usage:"
+
+        df -h .
+
+        '
+    - name: Install Linux bwrap build dependencies
+      if: ${{ runner.os == 'Linux' }}
+      shell: bash
+      run: 'set -euo pipefail
+
+        sudo apt-get update -y
+
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends
+        binutils pkg-config libcap-dev
+
+        '
+    - name: Set up Rust toolchain
+      uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
+      with:
+        targets: ${{ matrix.build-system == 'cargo' && matrix.target || '' }}
+    - if: ${{ matrix.build-system == 'cargo' && contains(matrix.target, 'linux') }}
+      name: Use hermetic Cargo home (musl)
+      shell: bash
+      run: 'set -euo pipefail
+
+        cargo_home="${GITHUB_WORKSPACE}/.cargo-home"
+
+        mkdir -p "${cargo_home}/bin"
+
+        echo "CARGO_HOME=${cargo_home}" >> "$GITHUB_ENV"
+
+        echo "${cargo_home}/bin" >> "$GITHUB_PATH"
+
+        : > "${cargo_home}/config.toml"
+
+        '
+    - if: ${{ matrix.build-system == 'cargo' && contains(matrix.target, 'linux') }}
+      name: Install Zig
+      uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
+      with:
+        version: 0.14.0
+        use-cache: false
+    - if: ${{ matrix.build-system == 'cargo' && contains(matrix.target, 'linux') }}
+      name: Install musl build tools
+      env:
+        TARGET: ${{ matrix.target }}
+        CODEX_MUSL_RELEASE_LINK_FLAGS: '1'
+      run: bash "${GITHUB_WORKSPACE}/.github/scripts/install-musl-build-tools.sh"
+    - if: ${{ matrix.build-system == 'cargo' && contains(matrix.target, 'linux') }}
+      name: Disable aws-lc jitter entropy (musl)
+      shell: bash
+      run: 'set -euo pipefail
+
+        # Avoid problematic aws-lc jitter entropy code path on musl builders.
+
+        echo "AWS_LC_SYS_NO_JITTER_ENTROPY=1" >> "$GITHUB_ENV"
+
+        target_no_jitter="AWS_LC_SYS_NO_JITTER_ENTROPY_${{ matrix.target }}"
+
+        target_no_jitter="${target_no_jitter//-/_}"
+
+        echo "${target_no_jitter}=1" >> "$GITHUB_ENV"
+
+        '
+    - name: Configure rusty_v8 artifact overrides and verify checksums
+      if: ${{ matrix.build-system == 'cargo' }}
+      uses: ./.github/actions/setup-rusty-v8
+      with:
+        target: ${{ matrix.target }}
+    - if: ${{ matrix.build-system == 'cargo' && contains(matrix.target, 'linux') }}
+      name: Build bwrap and export digest
+      shell: bash
+      run: "set -euo pipefail\ntarget=\"${{ matrix.target }}\"\ncargo build --target\
+        \ \"$target\" --release --timings --bin bwrap\n\nbwrap_path=\"target/${target}/release/bwrap\"\
+        \nif [[ ! -f \"$bwrap_path\" ]]; then\n  echo \"bwrap binary ${bwrap_path}\
+        \ not found\"\n  exit 1\nfi\n\n# Codex embeds this digest at build time and\
+        \ verifies the bundled\n# bwrap resource before use. Strip bwrap before hashing\
+        \ so the digest\n# covers the exact bytes that the release packages.\nstrip\
+        \ --strip-debug --strip-unneeded \"$bwrap_path\"\ndigest=\"$(sha256sum \"\
+        $bwrap_path\" | awk '{print $1}')\"\necho \"CODEX_BWRAP_SHA256=${digest}\"\
+        \ >> \"$GITHUB_ENV\"\necho \"Built bwrap ${bwrap_path} with sha256:${digest}\"\
+        \n"
+    - name: Cargo build
+      if: ${{ matrix.build-system == 'cargo' }}
+      shell: bash
+      run: "target=\"${{ matrix.target }}\"\nbuild_args=()\nfor binary in ${{ matrix.binaries\
+        \ }}; do\n  # bwrap was built, finalized, and hashed before this build so\n\
+        \  # Codex can embed the digest of the bytes that will be packaged.\n  if\
+        \ [[ \"$binary\" == \"bwrap\" ]]; then\n    continue\n  fi\n  build_args+=(--bin\
+        \ \"$binary\")\ndone\nSTABLE_GIT_COMMIT=\"$(git rev-parse HEAD)\"\nexport\
+        \ STABLE_GIT_COMMIT\ncargo build --target \"$target\" --release --timings\
+        \ \"${build_args[@]}\"\n"
+    - name: Prepare Bazel for release binaries or Linux voice
+      if: matrix.build-system == 'bazel' || (matrix.bundle == 'primary' && contains(matrix.target,
+        'linux'))
+      uses: ./.github/actions/prepare-bazel-ci
+      with:
+        target: ${{ matrix.target }}
+        cache-scope: bazel-release-${{ matrix.bundle }}
+    - name: Build Bazel release binaries and symbols
+      if: ${{ matrix.build-system == 'bazel' }}
+      uses: ./.github/actions/build-bazel-release
+      with:
+        target: ${{ matrix.target }}
+        bundle: ${{ matrix.bundle }}
+        release-dir: ${{ github.workspace }}/codex-rs/target/${{ matrix.target }}/release
+    - name: Build symbols archive and strip binaries
+      shell: bash
+      run: "binaries=()\nfor binary in ${{ matrix.binaries }}; do\n  # bwrap is already\
+        \ stripped before hashing. Its symbols are not\n  # useful enough to justify\
+        \ a separate pre-Codex symbols pass.\n  if [[ \"$binary\" == \"bwrap\" ]];\
+        \ then\n    continue\n  fi\n  binaries+=(\"$binary\")\ndone\nbash \"${GITHUB_WORKSPACE}/.github/scripts/archive-release-symbols-and-strip-binaries.sh\"\
+        \ \\\n  --target \"${{ matrix.target }}\" \\\n  --artifact-name \"${{ matrix.artifact_name\
+        \ }}\" \\\n  --release-dir \"target/${{ matrix.target }}/release\" \\\n  --archive-dir\
+        \ \"symbols-dist/${{ matrix.artifact_name }}\" \\\n  --binaries \"${binaries[*]}\"\
+        \n"
+    - name: Suffix Bazel artifact filenames
+      if: ${{ matrix.build-system == 'bazel' }}
+      shell: bash
+      run: "set -euo pipefail\nfor artifact in \"symbols-dist/${{ matrix.artifact_name\
+        \ }}\"/*; do\n  name=\"${artifact##*/}\"\n  stem=\"${name%%.*}\"\n  mv \"\
+        $artifact\" \"${artifact%/*}/${stem}-bazel${name#\"$stem\"}\"\ndone\n"
+    - name: Upload symbols archive
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: ${{ matrix.artifact_name }}-symbols${{ env.ARTIFACT_SUFFIX }}
+        path: codex-rs/symbols-dist/${{ matrix.artifact_name }}/*
+        if-no-files-found: error
+    - name: Build Linux voice runtime
+      if: ${{ matrix.bundle == 'primary' && contains(matrix.target, 'linux') }}
+      shell: bash
+      env:
+        APP_TARGET: ${{ matrix.target }}
+      run: "set -euo pipefail\ncd \"$GITHUB_WORKSPACE\"\nvoice_target=\"${APP_TARGET%-musl}-gnu\"\
+        \ncase \"$voice_target\" in\n  aarch64-unknown-linux-gnu) prefix=linux_aarch64\
+        \ ;;\n  x86_64-unknown-linux-gnu) prefix=linux_x86_64 ;;\n  *) exit 1 ;;\n\
+        esac\npython3 .github/scripts/run_bazel_with_buildbuddy.py build --config=release\
+        \ \\\n  //codex-rs/voice-host:codex-voice-host //third_party/voice:native_runtime\n\
+        source=\"bazel-bin/third_party/voice/native_runtime_${prefix}\"\noutput=\"\
+        ${RUNNER_TEMP}/signed-voice/${APP_TARGET}\"\nmkdir -p \"$output\"\npython3\
+        \ third_party/voice/release_runtime.py stage \\\n  --target \"$voice_target\"\
+        \ --source \"$source\" --output \"$output/runtime\"\ncp bazel-bin/codex-rs/voice-host/codex-voice-host\
+        \ \"$output/codex-voice-host\"\nchmod 0755 \"$output/codex-voice-host\"\n\
+        python3 third_party/voice/release_runtime.py seal \\\n  --target \"$voice_target\"\
+        \ --output \"$output/runtime\"\n"
+    - if: ${{ runner.os == 'macOS' }}
+      name: Stage unsigned macOS artifacts
+      shell: bash
+      run: "set -euo pipefail\n\ntarget=\"${{ matrix.target }}\"\nrelease_dir=\"target/${target}/release\"\
+        \ndest=\"unsigned-dist/${target}\"\nmkdir -p \"$dest\"\n\nfor binary in ${{\
+        \ matrix.binaries }}; do\n  binary_path=\"${release_dir}/${binary}\"\n  unsigned_name=\"\
+        ${binary}-${target}-unsigned\"\n  unsigned_path=\"${dest}/${unsigned_name}\"\
+        \n  if [[ ! -f \"${binary_path}\" ]]; then\n    echo \"Binary ${binary_path}\
+        \ not found\"\n    exit 1\n  fi\n\n  cp \"${binary_path}\" \"${unsigned_path}\"\
+        \n  tar -C \"$dest\" -czf \"${unsigned_path}.tar.gz\" \"${unsigned_name}\"\
+        \n  zstd -T0 -19 --rm \"${unsigned_path}\"\ndone\n"
+    - if: ${{ runner.os == 'macOS' }}
+      name: Upload unsigned macOS artifacts
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: ${{ matrix.artifact_name }}-unsigned${{ env.ARTIFACT_SUFFIX }}
+        path: codex-rs/unsigned-dist/${{ matrix.target }}/*
+        if-no-files-found: error
+    - if: ${{ contains(matrix.target, 'linux') }}
+      name: Cosign Linux artifacts
+      uses: ./.github/actions/linux-code-sign
+      with:
+        target: ${{ matrix.target }}
+        artifacts-dir: ${{ github.workspace }}/codex-rs/target/${{ matrix.target }}/release
+        binaries: ${{ matrix.binaries }}
+    - name: Stage artifacts
+      if: ${{ runner.os != 'macOS' }}
+      shell: bash
+      run: "dest=\"dist/${{ matrix.target }}\"\nmkdir -p \"$dest\"\n\nfor binary in\
+        \ ${{ matrix.binaries }}; do\n  # Both variants package the host and executor;\
+        \ only the primary publishes\n  # standalone binary archives to avoid duplicate\
+        \ release asset names.\n  if [[ \"${{ matrix.bundle }}\" == \"app-server\"\
+        \ && ( \"$binary\" == \"codex-code-mode-host\" || \"$binary\" == \"codex-exec-server\"\
+        \ ) ]]; then\n    continue\n  fi\n  cp \"target/${{ matrix.target }}/release/${binary}\"\
+        \ \"$dest/${binary}-${{ matrix.target }}\"\n  if [[ \"${{ matrix.target }}\"\
+        \ == *linux* ]]; then\n    cp \"target/${{ matrix.target }}/release/${binary}.sigstore\"\
+        \ \\\n      \"$dest/${binary}-${{ matrix.target }}.sigstore\"\n  fi\ndone\n\
+        \nif [[ \"${{ matrix.build_dmg }}\" == \"true\" ]]; then\n  cp target/${{\
+        \ matrix.target }}/release/zaino-${{ matrix.target }}.dmg \"$dest/zaino-${{\
+        \ matrix.target }}.dmg\"\nfi\n"
+    - name: Build Codex package archive
+      if: ${{ runner.os != 'macOS' }}
+      shell: bash
+      env:
+        TARGET: ${{ matrix.target }}
+        BUNDLE: ${{ matrix.bundle }}
+      run: "set -euo pipefail\nvoice_args=()\nif [[ \"$BUNDLE\" == \"primary\" &&\
+        \ \"$TARGET\" == *-unknown-linux-musl ]]; then\n  voice_args+=(--voice-release-dir\
+        \ \"${RUNNER_TEMP}/signed-voice/${TARGET}\")\n  voice_args+=(--release-version\
+        \ \"${GITHUB_REF_NAME#rust-v}\")\nfi\nbash \"${GITHUB_WORKSPACE}/.github/scripts/build-codex-package-archive.sh\"\
+        \ \\\n  --target \"$TARGET\" \\\n  --bundle \"$BUNDLE\" \\\n  --entrypoint-dir\
+        \ \"target/${TARGET}/release\" \\\n  --archive-dir \"dist/${TARGET}\" \\\n\
+        \  \"${voice_args[@]}\"\n"
+    - name: Cosign Linux voice package archives
+      if: ${{ matrix.bundle == 'primary' && contains(matrix.target, 'linux') }}
+      uses: ./.github/actions/linux-code-sign
+      with:
+        target: ${{ matrix.target }}
+        artifacts-dir: ${{ github.workspace }}/codex-rs/dist/${{ matrix.target }}
+        binaries: codex-package-${{ matrix.target }}.tar.gz codex-package-${{ matrix.target
+          }}.tar.zst
+    - name: Set up Python release tools
+      if: ${{ matrix.build-system == 'cargo' && matrix.bundle == 'primary' && runner.os
+        != 'macOS' }}
+      uses: ./.github/actions/setup-python-release-tools
+      with:
+        group: runtime
+    - name: Build Python runtime wheel
+      if: ${{ matrix.build-system == 'cargo' && matrix.bundle == 'primary' && runner.os
+        != 'macOS' }}
+      shell: bash
+      run: "set -euo pipefail\n\ncase \"${{ matrix.target }}\" in\n  aarch64-apple-darwin)\n\
+        \    platform_tag=\"macosx_11_0_arm64\"\n    ;;\n  x86_64-apple-darwin)\n\
+        \    platform_tag=\"macosx_10_9_x86_64\"\n    ;;\n  aarch64-unknown-linux-musl)\n\
+        \    platform_tag=\"manylinux_2_17_aarch64\"\n    ;;\n  x86_64-unknown-linux-musl)\n\
+        \    platform_tag=\"manylinux_2_17_x86_64\"\n    ;;\n  *)\n    echo \"No Python\
+        \ runtime wheel platform tag for ${{ matrix.target }}\"\n    exit 1\n    ;;\n\
+        esac\n\n# Keep the existing manylinux_2_17 wheel compatible with older glibc.\n\
+        # GNU voice libraries belong in the signed release package archives,\n# but\
+        \ their minimum glibc version is not covered by this wheel tag.\nwheel_archives=\"\
+        ${RUNNER_TEMP}/voice-free-wheel/${{ matrix.target }}\"\nbash \"${GITHUB_WORKSPACE}/.github/scripts/build-codex-package-archive.sh\"\
+        \ \\\n  --target \"${{ matrix.target }}\" \\\n  --bundle primary \\\n  --entrypoint-dir\
+        \ \"target/${{ matrix.target }}/release\" \\\n  --archive-dir \"$wheel_archives\"\
+        \nwheel_archive=\"${wheel_archives}/codex-package-${{ matrix.target }}.tar.gz\"\
+        \npython3 - \"$wheel_archive\" <<'PY'\nimport sys\nimport tarfile\nwith tarfile.open(sys.argv[1])\
+        \ as archive:\n    assert not any(\"codex-resources/voice/\" in item.name\
+        \ for item in archive)\nPY\n\nstage_dir=\"${RUNNER_TEMP}/zaino-cli-bin-${{\
+        \ matrix.target }}\"\nwheel_dir=\"${GITHUB_WORKSPACE}/python-runtime-dist/${{\
+        \ matrix.target }}\"\nstage_runtime_args=(\n  \"${GITHUB_WORKSPACE}/sdk/python/scripts/update_sdk_artifacts.py\"\
+        \n  stage-runtime\n  \"$stage_dir\"\n  \"$wheel_archive\"\n  --codex-version\
+        \ \"${GITHUB_REF_NAME}\"\n  --platform-tag \"$platform_tag\"\n)\npython3 \"\
+        ${stage_runtime_args[@]}\"\nuv build --offline --no-build-isolation --no-create-gitignore\
+        \ \\\n  --python \"${RUNNER_TEMP}/python-runtime-build-venv\" --wheel --out-dir\
+        \ \"$wheel_dir\" \"$stage_dir\"\n"
+    - name: Upload Python runtime wheel
+      if: ${{ matrix.build-system == 'cargo' && matrix.bundle == 'primary' && runner.os
+        != 'macOS' }}
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: python-runtime-wheel-${{ matrix.target }}
+        path: python-runtime-dist/${{ matrix.target }}/*.whl
+        if-no-files-found: error
+    - name: Compress artifacts
+      if: ${{ runner.os != 'macOS' }}
+      shell: bash
+      run: "# Path that contains the uncompressed binaries for the current\n# ${{\
+        \ matrix.target }}\ndest=\"dist/${{ matrix.target }}\"\n\n# For compatibility\
+        \ with environments that lack the `zstd` tool we\n# additionally create a\
+        \ `.tar.gz` alongside every binary we publish.\n# The end result is:\n#  \
+        \ codex-<target>.zst          (existing)\n#   codex-<target>.tar.gz      \
+        \ (new)\n\n# 1. Produce a .tar.gz for every file in the directory *before*\
+        \ we\n#    run `zstd --rm`, because that flag deletes the original files.\n\
+        for f in \"$dest\"/*; do\n  base=\"$(basename \"$f\")\"\n  # Skip files that\
+        \ are already archives (shouldn't happen, but be\n  # safe).\n  if [[ \"$base\"\
+        \ == *.tar.gz || \"$base\" == *.tar.zst || \"$base\" == *.zip || \"$base\"\
+        \ == *.dmg ]]; then\n    continue\n  fi\n\n  # Don't try to compress signature\
+        \ bundles.\n  if [[ \"$base\" == *.sigstore ]]; then\n    continue\n  fi\n\
+        \n  # Create per-binary tar.gz\n  tar -C \"$dest\" -czf \"$dest/${base}.tar.gz\"\
+        \ \"$base\"\n\n  # Also create .zst and remove the uncompressed binaries to\
+        \ keep\n  # non-Windows artifact directories small.\n  zstd -T0 -19 --rm \"\
+        $dest/$base\"\ndone\n"
+    - name: Suffix Bazel artifact filenames
+      if: ${{ matrix.build-system == 'bazel' && runner.os != 'macOS' }}
+      shell: bash
+      run: "set -euo pipefail\nfor artifact in \"dist/${{ matrix.target }}\"/*; do\n\
+        \  name=\"${artifact##*/}\"\n  stem=\"${name%%.*}\"\n  mv \"$artifact\" \"\
+        ${artifact%/*}/${stem}-bazel${name#\"$stem\"}\"\ndone\n"
+    - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      if: ${{ runner.os != 'macOS' }}
+      with:
+        name: ${{ matrix.artifact_name }}${{ env.ARTIFACT_SUFFIX }}
+        path: 'codex-rs/dist/${{ matrix.target }}/*
+
+          '
+  build-macos-voice:
+    needs:
+    - tag-check
+    name: Build voice runtime - ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    environment:
+      name: bazel
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - target: aarch64-apple-darwin
+          runner: macos-15
+          prefix: macos_aarch64
+        - target: x86_64-apple-darwin
+          runner: macos-15-intel
+          prefix: macos_x86_64
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        persist-credentials: false
+    - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+      with:
+        python-version: '3.12'
+    - name: Prepare Bazel CI
+      uses: ./.github/actions/prepare-bazel-ci
+      with:
+        target: ${{ matrix.target }}
+        cache-scope: bazel-release-primary
+    - name: Build matching helper and native runtime
+      shell: bash
+      env:
+        TARGET: ${{ matrix.target }}
+        PREFIX: ${{ matrix.prefix }}
+      run: "set -euo pipefail\n# Release tags bump Cargo.toml without rewriting the\
+        \ workspace lockfile.\n# Refresh workspace versions before Bazel reads the\
+        \ Cargo dependency graph.\n(cd codex-rs && cargo update --workspace)\npython3\
+        \ .github/scripts/run_bazel_with_buildbuddy.py build --config=release \\\n\
+        \  --macos_minimum_os=14.0 //codex-rs/voice-host:codex-voice-host //third_party/voice:native_runtime\n\
+        runtime=\"bazel-bin/third_party/voice/native_runtime_${PREFIX}\"\nPYTHONPATH=third_party/voice\
+        \ python3 - \"$runtime\" \"$TARGET\" <<'PY'\nfrom pathlib import Path\nimport\
+        \ sys\nfrom package_runtime import runtime_files\nruntime_files(Path(sys.argv[1]).resolve(strict=True),\
+        \ sys.argv[2])\nPY\nmkdir -p \"voice-unsigned/${TARGET}\"\ncp -R \"$runtime\"\
+        \ \"voice-unsigned/${TARGET}/runtime\"\n# GNU tar extraction and signing need\
+        \ writable copies of Bazel outputs.\nchmod -R u+w \"voice-unsigned/${TARGET}/runtime\"\
+        \ncp bazel-bin/codex-rs/voice-host/codex-voice-host \"voice-unsigned/${TARGET}/codex-voice-host\"\
+        \ntar -C \"voice-unsigned/${TARGET}\" -czf \"voice-unsigned-${TARGET}.tar.gz\"\
+        \ runtime codex-voice-host\n"
+    - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: voice-${{ matrix.target }}-unsigned
+        path: voice-unsigned-${{ matrix.target }}.tar.gz
+        if-no-files-found: error
+  sign-macos-binaries:
+    needs:
+    - build
+    - build-macos-voice
+    name: Sign macOS binaries - ${{ matrix.target }} - ${{ matrix.bundle }} - ${{
+      matrix.build-system }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: codesigning
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ARTIFACT_SUFFIX: ${{ matrix.build-system == 'bazel' && '-bazel' || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        build-system:
+        - cargo
+        target:
+        - aarch64-apple-darwin
+        - x86_64-apple-darwin
+        bundle:
+        - primary
+        - app-server
+        include:
+        - target: aarch64-apple-darwin
+          bundle: primary
+          artifact_name: aarch64-apple-darwin
+          binaries: zaino codex-code-mode-host codex-exec-server codex-responses-api-proxy
+        - target: aarch64-apple-darwin
+          bundle: app-server
+          artifact_name: aarch64-apple-darwin-app-server
+          binaries: codex-app-server codex-code-mode-host codex-exec-server
+        - target: x86_64-apple-darwin
+          bundle: primary
+          artifact_name: x86_64-apple-darwin
+          binaries: zaino codex-code-mode-host codex-exec-server codex-responses-api-proxy
+        - target: x86_64-apple-darwin
+          bundle: app-server
+          artifact_name: x86_64-apple-darwin-app-server
+          binaries: codex-app-server codex-code-mode-host codex-exec-server
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        persist-credentials: false
+    - name: Download unsigned macOS binaries
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: ${{ matrix.artifact_name }}-unsigned${{ env.ARTIFACT_SUFFIX }}
+        path: ${{ runner.temp }}/unsigned-macos
+    - name: Download unsigned voice runtime
+      if: ${{ matrix.bundle == 'primary' }}
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: voice-${{ matrix.target }}-unsigned
+        path: ${{ runner.temp }}/unsigned-voice
+    - name: Set up AKV PKCS11 macOS signing
+      if: ${{ vars.ZAINO_MACOS_SIGNING == 'true' }}
+      uses: ./.github/actions/setup-akv-pkcs11-codesigning
+      with:
+        rcodesign-blob-uri: ${{ secrets.AKV_CODESIGN_RCODESIGN_BLOB_URI }}
+        rcodesign-sha256: ${{ secrets.AKV_CODESIGN_RCODESIGN_SHA256 }}
+        akv-pkcs11-library-blob-uri: ${{ secrets.AKV_CODESIGN_PKCS11_LIBRARY_BLOB_URI
+          }}
+        akv-pkcs11-library-sha256: ${{ secrets.AKV_CODESIGN_PKCS11_LIBRARY_SHA256
+          }}
+        azure-client-id: ${{ secrets.AKV_CODESIGN_AZURE_CLIENT_ID }}
+        azure-tenant-id: ${{ secrets.AKV_CODESIGN_TENANT }}
+        azure-subscription-id: ${{ secrets.AKV_CODESIGN_SUBSCRIPTION }}
+        key-vault-name: ${{ secrets.AKV_CODESIGN_KEY_VAULT_NAME }}
+        key-name: ${{ secrets.AKV_CODESIGN_KEY_NAME }}
+        key-version: ${{ secrets.AKV_CODESIGN_KEY_VERSION || '' }}
+        certificate-sha256: ${{ secrets.AKV_CODESIGN_CERTIFICATE_SHA256 || '' }}
+    - name: Sign and notarize macOS binaries
+      if: ${{ vars.ZAINO_MACOS_SIGNING == 'true' }}
+      shell: bash
+      env:
+        TARGET: ${{ matrix.target }}
+        BINARIES: ${{ matrix.binaries }}
+        APPLE_NOTARIZATION_AKV_KEY_NAME: ${{ secrets.AKV_NOTARIZATION_KEY_NAME }}
+        APPLE_NOTARIZATION_AKV_KEY_VERSION: ${{ secrets.AKV_NOTARIZATION_KEY_VERSION
+          }}
+      run: "set -euo pipefail\n\ninput_dir=\"${RUNNER_TEMP}/unsigned-macos\"\noutput_dir=\"\
+        ${GITHUB_WORKSPACE}/signed-macos/${TARGET}\"\nreport_dir=\"${GITHUB_WORKSPACE}/macos-binary-signing-verification/${TARGET}\"\
+        \nmkdir -p \"$output_dir\" \"$report_dir\"\n\nfor binary in ${BINARIES}; do\n\
+        \  unsigned_path=\"${input_dir}/${binary}-${TARGET}-unsigned.zst\"\n  signed_path=\"\
+        ${output_dir}/${binary}\"\n  if [[ ! -f \"$unsigned_path\" ]]; then\n    echo\
+        \ \"Unsigned binary $unsigned_path not found\"\n    exit 1\n  fi\n\n  zstd\
+        \ -d --stdout \"$unsigned_path\" >\"$signed_path\"\n  chmod 0755 \"$signed_path\"\
+        \n\n  entitlements=\"${GITHUB_WORKSPACE}/.github/scripts/macos-signing/${binary}.entitlements.plist\"\
+        \n  if [[ ! -f \"$entitlements\" ]]; then\n    echo \"Entitlements file $entitlements\
+        \ not found\"\n    exit 1\n  fi\n\n  .github/scripts/macos-signing/sign_macos_code.sh\
+        \ \\\n    --target \"$signed_path\" \\\n    --identity unused \\\n    --deep\
+        \ false \\\n    --identifier \"$binary\" \\\n    --options runtime \\\n  \
+        \  --timestamp true \\\n    --entitlements \"$entitlements\"\n\n  mkdir -p\
+        \ \"${report_dir}/${binary}\"\n  rcodesign print-signature-info \"$signed_path\"\
+        \ \\\n    >\"${report_dir}/${binary}/signature-info.yaml\"\n\n  .github/scripts/macos-signing/notarize_macos_binary_with_akv.sh\
+        \ \\\n    --binary \"$signed_path\" \\\n    --report-dir \"${report_dir}/${binary}\"\
+        \ndone\n"
+    - name: Fetch, sign, and notarize pinned macOS helpers
+      if: ${{ matrix.bundle == 'primary' && vars.ZAINO_MACOS_SIGNING == 'true' }}
+      shell: bash
+      env:
+        TARGET: ${{ matrix.target }}
+        APPLE_NOTARIZATION_AKV_KEY_NAME: ${{ secrets.AKV_NOTARIZATION_KEY_NAME }}
+        APPLE_NOTARIZATION_AKV_KEY_VERSION: ${{ secrets.AKV_NOTARIZATION_KEY_VERSION
+          }}
+      run: "set -euo pipefail\n\nsigned_root=\"${GITHUB_WORKSPACE}/signed-resources/${TARGET}\"\
+        \nmkdir -p \"$signed_root\"\n\nPYTHONPATH=\"${GITHUB_WORKSPACE}/scripts\"\
+        \ python3 - \"$TARGET\" \"$signed_root\" <<'PY'\nimport shutil\nimport sys\n\
+        from pathlib import Path\n\nfrom codex_package.ripgrep import fetch_rg\nfrom\
+        \ codex_package.targets import TARGET_SPECS\n\nspec = TARGET_SPECS[sys.argv[1]]\n\
+        signed_root = Path(sys.argv[2])\nshutil.copy2(fetch_rg(spec), signed_root\
+        \ / \"rg\")\nPY\n\nfor resource in rg; do\n  binary=\"${signed_root}/${resource}\"\
+        \n  report_dir=\"${GITHUB_WORKSPACE}/macos-binary-signing-verification/${TARGET}/${resource}\"\
+        \n  mkdir -p \"$report_dir\"\n  chmod 0755 \"$binary\"\n  .github/scripts/macos-signing/sign_macos_code.sh\
+        \ \\\n    --target \"$binary\" \\\n    --identity unused \\\n    --deep false\
+        \ \\\n    --identifier \"com.zaino.cli.${resource}\" \\\n    --options runtime\
+        \ \\\n    --timestamp true\n\n  rcodesign print-signature-info \"$binary\"\
+        \ \\\n    >\"${report_dir}/signature-info.yaml\"\n\n  .github/scripts/macos-signing/notarize_macos_binary_with_akv.sh\
+        \ \\\n    --binary \"$binary\" \\\n    --report-dir \"$report_dir\"\ndone\n"
+    - name: Sign and notarize voice runtime
+      if: ${{ matrix.bundle == 'primary' }}
+      shell: bash
+      env:
+        TARGET: ${{ matrix.target }}
+        APPLE_NOTARIZATION_AKV_KEY_NAME: ${{ secrets.AKV_NOTARIZATION_KEY_NAME }}
+        APPLE_NOTARIZATION_AKV_KEY_VERSION: ${{ secrets.AKV_NOTARIZATION_KEY_VERSION
+          }}
+      run: "set -euo pipefail\nunsigned=\"${RUNNER_TEMP}/unsigned-voice/extracted\"\
+        \nsigned=\"${GITHUB_WORKSPACE}/signed-voice/${TARGET}\"\nmkdir -p \"$unsigned\"\
+        \ \"$signed\"\ntar -xzf \"${RUNNER_TEMP}/unsigned-voice/voice-unsigned-${TARGET}.tar.gz\"\
+        \ -C \"$unsigned\"\npython3 third_party/voice/release_runtime.py stage \\\n\
+        \  --target \"$TARGET\" --source \"$unsigned/runtime\" --output \"$signed/runtime\"\
+        \ncp \"$unsigned/codex-voice-host\" \"$signed/codex-voice-host\"\nchmod 0755\
+        \ \"$signed/codex-voice-host\"\n\nwhile IFS= read -r -d '' library; do\n \
+        \ name=\"$(basename \"$library\")\"\n  .github/scripts/macos-signing/sign_macos_code.sh\
+        \ \\\n    --target \"$library\" --identity unused --deep false \\\n    --identifier\
+        \ \"com.zaino.cli.voice.${name}\" \\\n    --options runtime --timestamp true\n\
+        done < <(find \"$signed/runtime\" -name '*.dylib' -type f -print0)\n.github/scripts/macos-signing/sign_macos_code.sh\
+        \ \\\n  --target \"$signed/codex-voice-host\" --identity unused --deep false\
+        \ \\\n  --identifier com.zaino.cli.voice-host --options runtime --timestamp\
+        \ true \\\n  --entitlements .github/scripts/macos-signing/codex-voice-host.entitlements.plist\n\
+        \n# Notarize the actual signed closure together, then hash those bytes.\n\
+        (cd \"$signed\" && zip -qr \"${RUNNER_TEMP}/voice-${TARGET}.zip\" runtime\
+        \ codex-voice-host)\nreport_dir=\"${GITHUB_WORKSPACE}/macos-binary-signing-verification/${TARGET}/voice\"\
+        \nmkdir -p \"$report_dir\"\npython3 .github/scripts/macos-signing/notarize_with_akv.py\
+        \ \\\n  --file \"${RUNNER_TEMP}/voice-${TARGET}.zip\" \\\n  --report-log \"\
+        ${report_dir}/notarization.json\" \\\n  --max-wait-seconds 600\npython3 third_party/voice/release_runtime.py\
+        \ seal \\\n  --target \"$TARGET\" --output \"$signed/runtime\"\ntar -C \"\
+        $signed\" -czf \"${GITHUB_WORKSPACE}/signed-voice-${TARGET}.tar.gz\" \\\n\
+        \  runtime codex-voice-host\n"
+    - name: Upload signed voice runtime
+      if: ${{ matrix.bundle == 'primary' }}
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: voice-${{ matrix.target }}-signed${{ env.ARTIFACT_SUFFIX }}
+        path: signed-voice-${{ matrix.target }}.tar.gz
+        if-no-files-found: error
+    - name: Stage unsigned macOS binaries as the signed artifact
+      if: ${{ vars.ZAINO_MACOS_SIGNING != 'true' }}
+      shell: bash
+      run: "set -euo pipefail\ndest=\"signed-macos/${TARGET}\"\nmkdir -p \"$dest\"\
+        \nsrc=\"target/${TARGET}/release\"\nfor binary in ${{ matrix.binaries }};\
+        \ do\n  if [[ -f \"${src}/${binary}\" ]]; then\n    cp \"${src}/${binary}\"\
+        \ \"${dest}/${binary}\"\n    chmod 0755 \"${dest}/${binary}\"\n  fi\ndone\n"
+      env:
+        TARGET: ${{ matrix.target }}
+    - name: Fetch macOS helpers without signing
+      if: ${{ matrix.bundle == 'primary' && vars.ZAINO_MACOS_SIGNING != 'true' }}
+      shell: bash
+      env:
+        TARGET: ${{ matrix.target }}
+      run: 'set -euo pipefail
+
+        signed_root="${GITHUB_WORKSPACE}/signed-resources/${TARGET}"
+
+        mkdir -p "$signed_root"
+
+        PYTHONPATH="${GITHUB_WORKSPACE}/scripts" python3 - "$TARGET" "$signed_root"
+        <<''PY''
+
+        import shutil
+
+        import sys
+
+        from pathlib import Path
+
+
+        from codex_package.ripgrep import fetch_rg
+
+        from codex_package.targets import TARGET_SPECS
+
+
+        spec = TARGET_SPECS[sys.argv[1]]
+
+        signed_root = Path(sys.argv[2])
+
+        shutil.copy2(fetch_rg(spec), signed_root / "rg")
+
+        PY
+
+        chmod -R 0755 "$signed_root"
+
+        '
+    - name: Upload signed macOS binaries
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: ${{ matrix.artifact_name }}-signed-binaries${{ env.ARTIFACT_SUFFIX }}
+        path: signed-macos/${{ matrix.target }}/*
+        if-no-files-found: error
+    - name: Upload signed macOS helpers
+      if: ${{ matrix.bundle == 'primary' }}
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: ${{ matrix.target }}-signed-resources${{ env.ARTIFACT_SUFFIX }}
+        path: signed-resources/${{ matrix.target }}/*
+        if-no-files-found: error
+    - name: Upload binary signing verification
+      if: ${{ always() }}
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: ${{ matrix.artifact_name }}-binary-signing-verification${{ env.ARTIFACT_SUFFIX
+          }}
+        path: macos-binary-signing-verification/${{ matrix.target }}/
+        if-no-files-found: warn
+  package-macos:
+    needs:
+    - sign-macos-binaries
+    name: Package macOS artifacts - ${{ matrix.target }} - ${{ matrix.bundle }} -
+      ${{ matrix.build-system }}
+    runs-on: macos-15-xlarge
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: codex-rs
+    env:
+      ARTIFACT_SUFFIX: ${{ matrix.build-system == 'bazel' && '-bazel' || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        build-system:
+        - cargo
+        target:
+        - aarch64-apple-darwin
+        - x86_64-apple-darwin
+        bundle:
+        - primary
+        - app-server
+        include:
+        - target: aarch64-apple-darwin
+          bundle: primary
+          artifact_name: aarch64-apple-darwin
+          binaries: zaino codex-code-mode-host codex-exec-server codex-responses-api-proxy
+          build_dmg: 'true'
+        - target: aarch64-apple-darwin
+          bundle: app-server
+          artifact_name: aarch64-apple-darwin-app-server
+          binaries: codex-app-server codex-code-mode-host codex-exec-server
+          build_dmg: 'false'
+        - target: x86_64-apple-darwin
+          bundle: primary
+          artifact_name: x86_64-apple-darwin
+          binaries: zaino codex-code-mode-host codex-exec-server codex-responses-api-proxy
+          build_dmg: 'true'
+        - target: x86_64-apple-darwin
+          bundle: app-server
+          artifact_name: x86_64-apple-darwin-app-server
+          binaries: codex-app-server codex-code-mode-host codex-exec-server
+          build_dmg: 'false'
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        persist-credentials: false
+    - name: Download signed macOS binaries
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: ${{ matrix.artifact_name }}-signed-binaries${{ env.ARTIFACT_SUFFIX }}
+        path: codex-rs/target/${{ matrix.target }}/release
+    - name: Download signed macOS helpers
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: ${{ matrix.target }}-signed-resources${{ env.ARTIFACT_SUFFIX }}
+        path: codex-rs/signed-resources/${{ matrix.target }}
+    - name: Download signed voice runtime
+      if: ${{ matrix.bundle == 'primary' }}
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: voice-${{ matrix.target }}-signed${{ env.ARTIFACT_SUFFIX }}
+        path: ${{ runner.temp }}/signed-voice
+    - name: Verify signed voice runtime
+      if: ${{ matrix.bundle == 'primary' }}
+      shell: bash
+      env:
+        TARGET: ${{ matrix.target }}
+      run: "set -euo pipefail\nroot=\"${RUNNER_TEMP}/signed-voice/${TARGET}\"\nmkdir\
+        \ -p \"$root\"\ntar -xzf \"${RUNNER_TEMP}/signed-voice/signed-voice-${TARGET}.tar.gz\"\
+        \ -C \"$root\"\ncase \"$TARGET\" in\n  aarch64-apple-darwin) arch=arm64 ;;\n\
+        \  x86_64-apple-darwin) arch=x86_64 ;;\n  *) exit 1 ;;\nesac\nPYTHONPATH=\"\
+        ${GITHUB_WORKSPACE}/third_party/voice\" python3 - \"$root/runtime\" \"$TARGET\"\
+        \ <<'PY'\nfrom pathlib import Path\nimport sys\nfrom package_runtime import\
+        \ runtime_files\nruntime_files(Path(sys.argv[1]).resolve(strict=True), sys.argv[2],\
+        \ public_release=True)\nPY\nwhile IFS= read -r -d '' binary; do\n  lipo \"\
+        $binary\" -verify_arch \"$arch\"\n  codesign --verify --strict --verbose=2\
+        \ \"$binary\"\ndone < <(find \"$root/runtime\" -name '*.dylib' -type f -print0)\n\
+        lipo \"$root/codex-voice-host\" -verify_arch \"$arch\"\ncodesign --verify\
+        \ --strict --verbose=2 \"$root/codex-voice-host\"\n"
+    - name: Verify signed macOS binaries
+      shell: bash
+      run: "set -euo pipefail\nfor binary in ${{ matrix.binaries }}; do\n  binary_path=\"\
+        target/${{ matrix.target }}/release/${binary}\"\n  chmod 0755 \"$binary_path\"\
+        \n  codesign --verify --strict --verbose=2 \"$binary_path\"\ndone\n\nfor resource\
+        \ in rg; do\n  resource_path=\"signed-resources/${{ matrix.target }}/${resource}\"\
+        \n  chmod 0755 \"$resource_path\"\n  codesign --verify --strict --verbose=2\
+        \ \"$resource_path\"\ndone\n"
+    - name: Stage macOS artifacts
+      shell: bash
+      run: "set -euo pipefail\ndest=\"dist/${{ matrix.target }}\"\nmkdir -p \"$dest\"\
+        \n\nfor binary in ${{ matrix.binaries }}; do\n  # Both variants package the\
+        \ host and executor; only the primary publishes\n  # standalone binary archives\
+        \ to avoid duplicate release asset names.\n  if [[ \"${{ matrix.bundle }}\"\
+        \ == \"app-server\" && ( \"$binary\" == \"codex-code-mode-host\" || \"$binary\"\
+        \ == \"codex-exec-server\" ) ]]; then\n    continue\n  fi\n  cp \"target/${{\
+        \ matrix.target }}/release/${binary}\" \"$dest/${binary}-${{ matrix.target\
+        \ }}\"\ndone\n"
+    - name: Build Codex package archive
+      shell: bash
+      env:
+        TARGET: ${{ matrix.target }}
+        BUNDLE: ${{ matrix.bundle }}
+      run: "set -euo pipefail\nvoice_args=()\nif [[ \"$BUNDLE\" == \"primary\" ]];\
+        \ then\n  voice_args+=(--voice-release-dir \"${RUNNER_TEMP}/signed-voice/${TARGET}\"\
+        )\n  voice_args+=(--release-version \"${GITHUB_REF_NAME#rust-v}\")\nfi\nbash\
+        \ \"${GITHUB_WORKSPACE}/.github/scripts/build-codex-package-archive.sh\" \\\
+        \n  --target \"$TARGET\" \\\n  --bundle \"$BUNDLE\" \\\n  --entrypoint-dir\
+        \ \"target/${TARGET}/release\" \\\n  --archive-dir \"dist/${TARGET}\" \\\n\
+        \  --rg-bin \"signed-resources/${TARGET}/rg\" \\\n  ${voice_args[@]+\"${voice_args[@]}\"\
+        }\n"
+    - name: Build unsigned macOS DMG
+      if: ${{ matrix.build_dmg == 'true' }}
+      shell: bash
+      run: "set -euo pipefail\n\ntarget=\"${{ matrix.target }}\"\nrelease_dir=\"target/${target}/release\"\
+        \ndmg_root=\"${RUNNER_TEMP}/codex-dmg-root-${target}\"\nvolname=\"Zaino (${target})\"\
+        \ndmg_path=\"${release_dir}/zaino-${target}.dmg\"\n\nrm -rf \"$dmg_root\"\n\
+        mkdir -p \"$dmg_root\"\n\nfor binary in ${{ matrix.binaries }}; do\n  binary_path=\"\
+        ${release_dir}/${binary}\"\n  if [[ ! -f \"$binary_path\" ]]; then\n    echo\
+        \ \"Binary $binary_path not found\"\n    exit 1\n  fi\n  ditto \"$binary_path\"\
+        \ \"${dmg_root}/${binary}\"\ndone\n\nif [[ \"${{ matrix.bundle }}\" == \"\
+        primary\" ]]; then\n  # Keep the root-level invocation, but resolve it into\
+        \ the canonical\n  # package layout so InstallContext finds its adjacent voice\
+        \ runtime.\n  package=\"${RUNNER_TEMP}/codex-package-voice-${target}\"\n \
+        \ ditto \"$package\" \"$dmg_root\"\n  rm \"${dmg_root}/zaino\"\n  ln -s bin/zaino\
+        \ \"${dmg_root}/zaino\"\nfi\n\nrm -f \"$dmg_path\"\nhdiutil create \\\n  -volname\
+        \ \"$volname\" \\\n  -srcfolder \"$dmg_root\" \\\n  -format UDZO \\\n  -ov\
+        \ \\\n  \"$dmg_path\"\n\nif [[ ! -f \"$dmg_path\" ]]; then\n  echo \"DMG $dmg_path\
+        \ not found after build\"\n  exit 1\nfi\n"
+    - name: Upload unsigned macOS DMG
+      if: ${{ matrix.build_dmg == 'true' }}
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: ${{ matrix.artifact_name }}-unsigned-dmg${{ env.ARTIFACT_SUFFIX }}
+        path: codex-rs/target/${{ matrix.target }}/release/zaino-${{ matrix.target
+          }}.dmg
+        if-no-files-found: error
+    - name: Set up Python release tools
+      if: ${{ matrix.build-system == 'cargo' && matrix.bundle == 'primary' }}
+      uses: ./.github/actions/setup-python-release-tools
+      with:
+        group: runtime
+    - name: Build Python runtime wheel
+      if: ${{ matrix.build-system == 'cargo' && matrix.bundle == 'primary' }}
+      shell: bash
+      run: "set -euo pipefail\n\ncase \"${{ matrix.target }}\" in\n  aarch64-apple-darwin)\n\
+        \    platform_tag=\"macosx_11_0_arm64\"\n    ;;\n  x86_64-apple-darwin)\n\
+        \    platform_tag=\"macosx_10_9_x86_64\"\n    ;;\n  *)\n    echo \"No Python\
+        \ runtime wheel platform tag for ${{ matrix.target }}\"\n    exit 1\n    ;;\n\
+        esac\n\n# The wheel keeps its macOS 10.9/11 tags. The native voice build\n\
+        # currently targets macOS 14, so keep it in the release archives and\n# DMG\
+        \ but leave this older-OS-compatible wheel unchanged.\nwheel_archives=\"${RUNNER_TEMP}/voice-free-wheel/${{\
+        \ matrix.target }}\"\nbash \"${GITHUB_WORKSPACE}/.github/scripts/build-codex-package-archive.sh\"\
+        \ \\\n  --target \"${{ matrix.target }}\" \\\n  --bundle primary \\\n  --entrypoint-dir\
+        \ \"target/${{ matrix.target }}/release\" \\\n  --archive-dir \"$wheel_archives\"\
+        \ \\\n  --rg-bin \"signed-resources/${{ matrix.target }}/rg\"\nwheel_archive=\"\
+        ${wheel_archives}/codex-package-${{ matrix.target }}.tar.gz\"\npython3 - \"\
+        $wheel_archive\" <<'PY'\nimport sys\nimport tarfile\nwith tarfile.open(sys.argv[1])\
+        \ as archive:\n    assert not any(\"codex-resources/voice/\" in item.name\
+        \ for item in archive)\nPY\n\nstage_dir=\"${RUNNER_TEMP}/zaino-cli-bin-${{\
+        \ matrix.target }}\"\nwheel_dir=\"${GITHUB_WORKSPACE}/python-runtime-dist/${{\
+        \ matrix.target }}\"\npython3 \\\n  \"${GITHUB_WORKSPACE}/sdk/python/scripts/update_sdk_artifacts.py\"\
+        \ \\\n  stage-runtime \\\n  \"$stage_dir\" \\\n  \"$wheel_archive\" \\\n \
+        \ --codex-version \"${GITHUB_REF_NAME}\" \\\n  --platform-tag \"$platform_tag\"\
+        \nuv build --offline --no-build-isolation --no-create-gitignore \\\n  --python\
+        \ \"${RUNNER_TEMP}/python-runtime-build-venv\" --wheel --out-dir \"$wheel_dir\"\
+        \ \"$stage_dir\"\n"
+    - name: Upload Python runtime wheel
+      if: ${{ matrix.build-system == 'cargo' && matrix.bundle == 'primary' }}
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: python-runtime-wheel-${{ matrix.target }}
+        path: python-runtime-dist/${{ matrix.target }}/*.whl
+        if-no-files-found: error
+    - name: Compress artifacts
+      shell: bash
+      run: "set -euo pipefail\ndest=\"dist/${{ matrix.target }}\"\nfor f in \"$dest\"\
+        /*; do\n  base=\"$(basename \"$f\")\"\n  if [[ \"$base\" == *.tar.gz || \"\
+        $base\" == *.tar.zst || \"$base\" == *.zip || \"$base\" == *.dmg ]]; then\n\
+        \    continue\n  fi\n\n  tar -C \"$dest\" -czf \"$dest/${base}.tar.gz\" \"\
+        $base\"\n  zstd -T0 -19 --rm \"$dest/$base\"\ndone\n"
+    - name: Upload packaged macOS artifacts
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: ${{ matrix.artifact_name }}-packaged${{ env.ARTIFACT_SUFFIX }}
+        path: codex-rs/dist/${{ matrix.target }}/*
+        if-no-files-found: error
+  sign-macos-dmg:
+    needs:
+    - package-macos
+    name: Sign macOS DMG - ${{ matrix.target }} - ${{ matrix.build-system }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: codesigning
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ARTIFACT_SUFFIX: ${{ matrix.build-system == 'bazel' && '-bazel' || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        build-system:
+        - cargo
+        target:
+        - aarch64-apple-darwin
+        - x86_64-apple-darwin
+        include:
+        - target: aarch64-apple-darwin
+          artifact_name: aarch64-apple-darwin
+        - target: x86_64-apple-darwin
+          artifact_name: x86_64-apple-darwin
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        persist-credentials: false
+    - name: Download unsigned macOS DMG
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: ${{ matrix.artifact_name }}-unsigned-dmg${{ env.ARTIFACT_SUFFIX }}
+        path: ${{ runner.temp }}/unsigned-dmg
+    - name: Set up AKV PKCS11 macOS signing
+      uses: ./.github/actions/setup-akv-pkcs11-codesigning
+      with:
+        rcodesign-blob-uri: ${{ secrets.AKV_CODESIGN_RCODESIGN_BLOB_URI }}
+        rcodesign-sha256: ${{ secrets.AKV_CODESIGN_RCODESIGN_SHA256 }}
+        akv-pkcs11-library-blob-uri: ${{ secrets.AKV_CODESIGN_PKCS11_LIBRARY_BLOB_URI
+          }}
+        akv-pkcs11-library-sha256: ${{ secrets.AKV_CODESIGN_PKCS11_LIBRARY_SHA256
+          }}
+        azure-client-id: ${{ secrets.AKV_CODESIGN_AZURE_CLIENT_ID }}
+        azure-tenant-id: ${{ secrets.AKV_CODESIGN_TENANT }}
+        azure-subscription-id: ${{ secrets.AKV_CODESIGN_SUBSCRIPTION }}
+        key-vault-name: ${{ secrets.AKV_CODESIGN_KEY_VAULT_NAME }}
+        key-name: ${{ secrets.AKV_CODESIGN_KEY_NAME }}
+        key-version: ${{ secrets.AKV_CODESIGN_KEY_VERSION || '' }}
+        certificate-sha256: ${{ secrets.AKV_CODESIGN_CERTIFICATE_SHA256 || '' }}
+    - name: Sign, notarize, and staple macOS DMG
+      shell: bash
+      env:
+        TARGET: ${{ matrix.target }}
+        APPLE_NOTARIZATION_AKV_KEY_NAME: ${{ secrets.AKV_NOTARIZATION_KEY_NAME }}
+        APPLE_NOTARIZATION_AKV_KEY_VERSION: ${{ secrets.AKV_NOTARIZATION_KEY_VERSION
+          }}
+      run: "set -euo pipefail\n\ndmg_path=\"${RUNNER_TEMP}/unsigned-dmg/zaino-${TARGET}.dmg\"\
+        \nreport_dir=\"${GITHUB_WORKSPACE}/macos-dmg-signing-verification/${TARGET}\"\
+        \nif [[ ! -f \"$dmg_path\" ]]; then\n  echo \"Unsigned DMG $dmg_path not found\"\
+        \n  exit 1\nfi\n\n.github/scripts/macos-signing/sign_macos_code.sh \\\n  --target\
+        \ \"$dmg_path\" \\\n  --identity unused \\\n  --deep false \\\n  --timestamp\
+        \ true\n\nmkdir -p \"$report_dir\"\nrcodesign print-signature-info \"$dmg_path\"\
+        \ \\\n  >\"${report_dir}/signature-info-before-notarization.yaml\"\n\n.github/scripts/macos-signing/notarize_macos_dmg_with_akv.sh\
+        \ \\\n  --dmg \"$dmg_path\" \\\n  --report-dir \"$report_dir\"\n\nrcodesign\
+        \ print-signature-info \"$dmg_path\" \\\n  >\"${report_dir}/signature-info.yaml\"\
+        \n"
+    - name: Upload signed macOS DMG
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: ${{ matrix.artifact_name }}-signed-dmg${{ env.ARTIFACT_SUFFIX }}
+        path: ${{ runner.temp }}/unsigned-dmg/zaino-${{ matrix.target }}.dmg
+        if-no-files-found: error
+    - name: Upload DMG signing verification
+      if: ${{ always() }}
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: ${{ matrix.artifact_name }}-dmg-signing-verification${{ env.ARTIFACT_SUFFIX
+          }}
+        path: macos-dmg-signing-verification/${{ matrix.target }}/
+        if-no-files-found: warn
+  finalize-macos:
+    needs:
+    - package-macos
+    - sign-macos-dmg
+    name: Verify macOS artifacts - ${{ matrix.target }} - ${{ matrix.bundle }} - ${{
+      matrix.build-system }}
+    runs-on: macos-15-xlarge
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: codex-rs
+    env:
+      ARTIFACT_SUFFIX: ${{ matrix.build-system == 'bazel' && '-bazel' || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        build-system:
+        - cargo
+        target:
+        - aarch64-apple-darwin
+        - x86_64-apple-darwin
+        bundle:
+        - primary
+        - app-server
+        include:
+        - target: aarch64-apple-darwin
+          bundle: primary
+          artifact_name: aarch64-apple-darwin
+          binaries: zaino codex-code-mode-host codex-exec-server codex-responses-api-proxy
+          verify_dmg: 'true'
+        - target: aarch64-apple-darwin
+          bundle: app-server
+          artifact_name: aarch64-apple-darwin-app-server
+          binaries: codex-app-server codex-code-mode-host codex-exec-server
+          verify_dmg: 'false'
+        - target: x86_64-apple-darwin
+          bundle: primary
+          artifact_name: x86_64-apple-darwin
+          binaries: zaino codex-code-mode-host codex-exec-server codex-responses-api-proxy
+          verify_dmg: 'true'
+        - target: x86_64-apple-darwin
+          bundle: app-server
+          artifact_name: x86_64-apple-darwin-app-server
+          binaries: codex-app-server codex-code-mode-host codex-exec-server
+          verify_dmg: 'false'
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        persist-credentials: false
+    - name: Download packaged macOS artifacts
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: ${{ matrix.artifact_name }}-packaged${{ env.ARTIFACT_SUFFIX }}
+        path: codex-rs/dist/${{ matrix.target }}
+    - name: Download signed macOS binaries
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: ${{ matrix.artifact_name }}-signed-binaries${{ env.ARTIFACT_SUFFIX }}
+        path: ${{ runner.temp }}/signed-binaries
+    - name: Download signed macOS DMG
+      if: ${{ matrix.verify_dmg == 'true' }}
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: ${{ matrix.artifact_name }}-signed-dmg${{ env.ARTIFACT_SUFFIX }}
+        path: ${{ runner.temp }}/signed-dmg
+    - name: Verify signed macOS artifacts
+      shell: bash
+      run: "set -euo pipefail\n\ntarget=\"${{ matrix.target }}\"\npackaged_dir=\"\
+        dist/${target}\"\ncase \"$target\" in\n  aarch64-apple-darwin) expected_arch=\"\
+        arm64\" ;;\n  x86_64-apple-darwin) expected_arch=\"x86_64\" ;;\n  *)\n   \
+        \ echo \"Unexpected macOS target: $target\"\n    exit 1\n    ;;\nesac\n\n\
+        verify_signed_binary() {\n  local path=\"$1\"\n  local binary=\"$2\"\n  local\
+        \ actual_entitlements expected_entitlements normalized_actual normalized_expected\n\
+        \n  chmod 0755 \"$path\"\n  lipo \"$path\" -verify_arch \"$expected_arch\"\
+        \n  codesign --verify --strict --verbose=2 \"$path\"\n\n  expected_entitlements=\"\
+        ${GITHUB_WORKSPACE}/.github/scripts/macos-signing/${binary}.entitlements.plist\"\
+        \n  if [[ ! -f \"$expected_entitlements\" ]]; then\n    echo \"Expected entitlements\
+        \ file $expected_entitlements not found\"\n    exit 1\n  fi\n  actual_entitlements=\"\
+        $(mktemp)\"\n  normalized_actual=\"$(mktemp)\"\n  normalized_expected=\"$(mktemp)\"\
+        \n  codesign -d --entitlements :- \"$path\" >\"$actual_entitlements\"\n  #\
+        \ An omitted entitlement blob is valid only when the expected plist is empty.\n\
+        \  python3 - \"$expected_entitlements\" \"$actual_entitlements\" <<'PY'\n\
+        import plistlib\nimport sys\nfrom pathlib import Path\nexpected, actual =\
+        \ map(Path, sys.argv[1:])\nif not actual.stat().st_size and plistlib.loads(expected.read_bytes())\
+        \ == {}:\n    actual.write_bytes(expected.read_bytes())\nPY\n  plutil -convert\
+        \ xml1 -o \"$normalized_actual\" \"$actual_entitlements\"\n  plutil -convert\
+        \ xml1 -o \"$normalized_expected\" \"$expected_entitlements\"\n  diff -u \"\
+        $normalized_expected\" \"$normalized_actual\"\n  rm -f \"$actual_entitlements\"\
+        \ \"$normalized_actual\" \"$normalized_expected\"\n}\n\nfor binary in ${{\
+        \ matrix.binaries }}; do\n  binary_path=\"${RUNNER_TEMP}/signed-binaries/${binary}\"\
+        \n  verify_signed_binary \"$binary_path\" \"$binary\"\n\n  # The app-server\
+        \ package contains both helpers, but their standalone archives\n  # are omitted\
+        \ above to avoid duplicate release asset names.\n  if [[ \"${{ matrix.bundle\
+        \ }}\" == \"app-server\" && ( \"$binary\" == \"codex-code-mode-host\" || \"\
+        $binary\" == \"codex-exec-server\" ) ]]; then\n    continue\n  fi\n\n  direct_archive_dir=\"\
+        ${RUNNER_TEMP}/direct-archive-${binary}-${target}\"\n  rm -rf \"$direct_archive_dir\"\
+        \n  mkdir -p \"$direct_archive_dir\"\n  tar -xzf \"${packaged_dir}/${binary}-${target}.tar.gz\"\
+        \ -C \"$direct_archive_dir\"\n  verify_signed_binary \"${direct_archive_dir}/${binary}-${target}\"\
+        \ \"$binary\"\n\n  direct_zstd_path=\"${RUNNER_TEMP}/${binary}-${target}-from-zstd\"\
+        \n  zstd -d --stdout \"${packaged_dir}/${binary}-${target}.zst\" >\"$direct_zstd_path\"\
+        \n  verify_signed_binary \"$direct_zstd_path\" \"$binary\"\ndone\n\ncase \"\
+        ${{ matrix.bundle }}\" in\n  primary)\n    package_stem=\"codex-package\"\n\
+        \    package_entrypoint=\"zaino\"\n    ;;\n  app-server)\n    package_stem=\"\
+        codex-app-server-package\"\n    package_entrypoint=\"codex-app-server\"\n\
+        \    ;;\n  *)\n    echo \"Unexpected macOS bundle: ${{ matrix.bundle }}\"\n\
+        \    exit 1\n    ;;\nesac\n\npackage_dir=\"${RUNNER_TEMP}/${package_stem}-${target}\"\
+        \nrm -rf \"$package_dir\"\nmkdir -p \"$package_dir\"\ntar -xzf \"${packaged_dir}/${package_stem}-${target}.tar.gz\"\
+        \ -C \"$package_dir\"\nverify_signed_binary \"${package_dir}/bin/${package_entrypoint}\"\
+        \ \"$package_entrypoint\"\nverify_signed_binary \"${package_dir}/bin/codex-code-mode-host\"\
+        \ \"codex-code-mode-host\"\nverify_signed_binary \"${package_dir}/bin/codex-exec-server\"\
+        \ \"codex-exec-server\"\n\nfor resource in \\\n  \"${package_dir}/codex-path/rg\"\
+        \ndo\n  chmod 0755 \"$resource\"\n  lipo \"$resource\" -verify_arch \"$expected_arch\"\
+        \n  codesign --verify --strict --verbose=2 \"$resource\"\n  entitlements=\"\
+        $(mktemp)\"\n  codesign -d --entitlements :- \"$resource\" >\"$entitlements\"\
+        \n  if [[ -s \"$entitlements\" ]]; then\n    echo \"Bundled helper $resource\
+        \ must not have code-signing entitlements.\" >&2\n    plutil -p \"$entitlements\"\
+        \ >&2\n    exit 1\n  fi\n  rm -f \"$entitlements\"\ndone\n\nif [[ \"${{ matrix.bundle\
+        \ }}\" == \"primary\" ]]; then\n  voice=\"${package_dir}/codex-resources/voice\"\
+        \n  [[ -f \"${voice}/lib/libgstreamer-1.0.0.dylib\" ]]\n  export VOICE_BUILD_COMMIT=\"\
+        $(git rev-parse HEAD)\"\n  PYTHONPATH=\"${GITHUB_WORKSPACE}/third_party/voice\"\
+        \ python3 - \"$voice\" \"$target\" \"$package_dir\" <<'PY'\nimport json\n\
+        import sys\nfrom pathlib import Path\nfrom package_runtime import runtime_files\n\
+        from runtime import digest\n\nvoice, target, package = map(Path, sys.argv[1:])\n\
+        runtime_files(voice.resolve(strict=True), str(target), public_release=True)\n\
+        manifest = json.loads((voice / \"manifest.json\").read_text())\nassert manifest[\"\
+        buildCommit\"] == __import__(\"os\").environ[\"VOICE_BUILD_COMMIT\"]\nfor\
+        \ relative, expected in manifest[\"sha256\"].items():\n    assert digest(package\
+        \ / relative) == expected, relative\nPY\n  helper=\"${voice}/bin/codex-voice-host\"\
+        \n  [[ \"$(\"$helper\" --build-commit)\" == \"$VOICE_BUILD_COMMIT\" ]]\n \
+        \ while IFS= read -r -d '' library; do\n    lipo \"$library\" -verify_arch\
+        \ \"$expected_arch\"\n    codesign --verify --strict --verbose=2 \"$library\"\
+        \n  done < <(find \"$voice\" -name '*.dylib' -type f -print0)\n  verify_signed_binary\
+        \ \"$helper\" \"codex-voice-host\"\nfi\n\nif [[ \"${{ matrix.verify_dmg }}\"\
+        \ != \"true\" ]]; then\n  exit 0\nfi\n\ndmg_path=\"${RUNNER_TEMP}/signed-dmg/zaino-${target}.dmg\"\
+        \nmount_dir=\"${RUNNER_TEMP}/codex-dmg-mount-${target}\"\nif [[ ! -f \"$dmg_path\"\
+        \ ]]; then\n  echo \"Signed DMG $dmg_path not found\"\n  exit 1\nfi\n\nhdiutil\
+        \ verify \"$dmg_path\"\ncodesign --verify --strict --verbose=2 \"$dmg_path\"\
+        \nxcrun stapler validate \"$dmg_path\"\n\nrm -rf \"$mount_dir\"\nmkdir -p\
+        \ \"$mount_dir\"\nhdiutil attach \"$dmg_path\" -nobrowse -readonly -mountpoint\
+        \ \"$mount_dir\"\ncleanup_mount() {\n  hdiutil detach \"$mount_dir\" >/dev/null\n\
+        }\ntrap cleanup_mount EXIT\n\nfor binary in ${{ matrix.binaries }}; do\n \
+        \ verify_signed_binary \"${mount_dir}/${binary}\" \"$binary\"\ndone\n\nif\
+        \ [[ \"${{ matrix.bundle }}\" == \"primary\" ]]; then\n  [[ \"$(readlink \"\
+        ${mount_dir}/zaino\")\" == \"bin/zaino\" ]]\n  cmp \"${mount_dir}/codex-package.json\"\
+        \ \"${package_dir}/codex-package.json\"\n  cmp \"${mount_dir}/codex-resources/voice/manifest.json\"\
+        \ \\\n    \"${package_dir}/codex-resources/voice/manifest.json\"\n  cmp \"\
+        ${mount_dir}/codex-resources/voice/bin/codex-voice-host\" \\\n    \"${package_dir}/codex-resources/voice/bin/codex-voice-host\"\
+        \nfi\n\ncleanup_mount\ntrap - EXIT\ncp \"$dmg_path\" \"dist/${target}/zaino-${target}.dmg\"\
+        \n"
+    - name: Suffix Bazel artifact filenames
+      if: ${{ matrix.build-system == 'bazel' }}
+      shell: bash
+      run: "set -euo pipefail\nfor artifact in \"dist/${{ matrix.target }}\"/*; do\n\
+        \  name=\"${artifact##*/}\"\n  stem=\"${name%%.*}\"\n  mv \"$artifact\" \"\
+        ${artifact%/*}/${stem}-bazel${name#\"$stem\"}\"\ndone\n"
+    - name: Upload verified macOS artifacts
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: ${{ matrix.artifact_name }}${{ env.ARTIFACT_SUFFIX }}
+        path: codex-rs/dist/${{ matrix.target }}/*
+        if-no-files-found: error
+  stage-npm-packages:
+    name: stage npm packages
+    needs:
+    - build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        persist-credentials: false
+    - name: Download target artifacts
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        path: dist
+        pattern: '{aarch64,x86_64}-{apple-darwin{,-app-server},unknown-linux-musl{,-app-server},pc-windows-msvc}'
+    - name: Setup pnpm
+      uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288
+      with:
+        run_install: false
+    - name: Setup Node.js for npm packaging
+      uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
+      with:
+        node-version-file: .nvmrc
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+    - name: Stage npm packages
+      run: "release_version=\"${GITHUB_REF_NAME#rust-v}\"\n./scripts/stage_npm_packages.py\
+        \ \\\n  --release-version \"$release_version\" \\\n  --artifacts-dir \"${GITHUB_WORKSPACE}/dist\"\
+        \ \\\n  --package zaino \\\n  --package codex-responses-api-proxy \\\n  --package\
+        \ codex-sdk\n"
+    - name: Upload staged npm packages
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: npm-packages
+        path: dist/npm/*.tgz
+        if-no-files-found: error
+  release:
+    concurrency:
+      group: rust-release
+      cancel-in-progress: false
+    needs:
+    - tag-check
+    - build
+    - finalize-macos
+    - stage-npm-packages
+    name: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.release_name.outputs.name }}
+      tag: ${{ github.ref_name }}
+      make_latest: ${{ steps.release_name.outputs.make_latest }}
+      prerelease: ${{ steps.release_name.outputs.prerelease }}
+      should_publish_npm: ${{ steps.npm_publish_settings.outputs.should_publish }}
+      npm_tag: ${{ steps.npm_publish_settings.outputs.npm_tag }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        persist-credentials: false
+    - name: Generate release notes from tag commit message
+      id: release_notes
+      shell: bash
+      run: "set -euo pipefail\n\n# On tag pushes, GITHUB_SHA may be a tag object for\
+        \ annotated tags;\n# peel it to the underlying commit.\ncommit=\"$(git rev-parse\
+        \ \"${GITHUB_SHA}^{commit}\")\"\nnotes_path=\"${RUNNER_TEMP}/release-notes.md\"\
+        \n\n# Use the commit message for the commit the tag points at (not the\n#\
+        \ annotated tag message).\n# Preserve the previous publisher's 124,999-character\
+        \ cap, reserving\n# the last character for a trailing newline for GitHub's\
+        \ renderer.\ngit log -1 --format=%B \"${commit}\" |\n  python3 -c 'import\
+        \ sys; print(sys.stdin.read()[:124998])' > \"${notes_path}\"\n\necho \"path=${notes_path}\"\
+        \ >> \"${GITHUB_OUTPUT}\"\n"
+    - name: Download release artifacts
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        path: dist
+        pattern: '{{aarch64,x86_64}-{apple-darwin{,-app-server},unknown-linux-musl{,-app-server},pc-windows-msvc},*-symbols,argument-comment-lint-*,python-runtime-wheel-*,npm-packages}'
+    - name: Download verified provisioned macOS packages
+      if: vars.CODEX_PROVISIONED_MACOS_CANDIDATE == 'true'
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        path: dist
+        pattern: provisioned-macos-verified-candidate-*
+    - name: Remove per-architecture checksum filenames before release upload
+      if: vars.CODEX_PROVISIONED_MACOS_CANDIDATE == 'true'
+      run: rm dist/provisioned-macos-verified-candidate-*/SHA256SUMS
+    - name: List
+      run: ls -R dist/
+    - name: Add Codex package checksum manifest
+      run: "set -euo pipefail\n\nmanifest=\"dist/codex-package_SHA256SUMS\"\ntmp_manifest=\"\
+        $(mktemp)\"\nfind dist -type f \\\n  \\( -name 'codex-package-*.tar.gz' -o\
+        \ -name 'codex-app-server-package-*.tar.gz' -o -name 'zaino-provisioned-package-*.tar.gz'\
+        \ \\) \\\n  -print |\n  sort |\n  while IFS= read -r archive; do\n    sha256sum\
+        \ \"$archive\" |\n      awk -v name=\"$(basename \"$archive\")\" '{ print\
+        \ $1 \"  \" name }'\n  done > \"$tmp_manifest\"\n\nif [[ ! -s \"$tmp_manifest\"\
+        \ ]]; then\n  echo \"No Codex package archives found for checksum manifest\"\
+        \n  exit 1\nfi\n\nmv \"$tmp_manifest\" \"$manifest\"\ncat \"$manifest\"\n"
+    - name: Add config schema release asset
+      run: 'cp codex-rs/core/config.schema.json dist/config-schema.json
+
+        '
+    - name: Define release name
+      id: release_name
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: "set -euo pipefail\n# Extract the version from the tag name, which is in\
+        \ the format\n# \"rust-v0.1.0\".\nversion=\"${GITHUB_REF_NAME#rust-v}\"\n\
+        echo \"name=${version}\" >> $GITHUB_OUTPUT\nif [[ \"${version}\" == *-* ]];\
+        \ then\n  echo \"make_latest=false\" >> $GITHUB_OUTPUT\n  echo \"prerelease=true\"\
+        \ >> $GITHUB_OUTPUT\nelse\n  make_latest=\"$(gh api \"repos/${GITHUB_REPOSITORY}/releases/latest\"\
+        \ \\\n    | python3 .github/scripts/releases.py \"$version\" --check-github\
+        \ latest)\"\n  echo \"make_latest=${make_latest}\" >> $GITHUB_OUTPUT\n  echo\
+        \ \"prerelease=false\" >> $GITHUB_OUTPUT\nfi\n"
+    - name: Determine npm publish settings
+      id: npm_publish_settings
+      env:
+        VERSION: ${{ steps.release_name.outputs.name }}
+      run: "set -euo pipefail\nversion=\"${VERSION}\"\n\nif [[ \"${version}\" =~ ^[0-9]+\\\
+        .[0-9]+\\.[0-9]+$ ]]; then\n  echo \"should_publish=true\" >> \"$GITHUB_OUTPUT\"\
+        \n  echo \"npm_tag=\" >> \"$GITHUB_OUTPUT\"\nelif [[ \"${version}\" =~ ^[0-9]+\\\
+        .[0-9]+\\.[0-9]+-alpha\\.[0-9]+(\\.[0-9]+)?$ ]]; then\n  echo \"should_publish=true\"\
+        \ >> \"$GITHUB_OUTPUT\"\n  echo \"npm_tag=alpha\" >> \"$GITHUB_OUTPUT\"\n\
+        else\n  echo \"should_publish=false\" >> \"$GITHUB_OUTPUT\"\n  echo \"npm_tag=\"\
+        \ >> \"$GITHUB_OUTPUT\"\nfi\n"
+    - name: Create GitHub Release
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        RELEASE_NAME: ${{ steps.release_name.outputs.name }}
+        RELEASE_NOTES: ${{ steps.release_notes.outputs.path }}
+        MAKE_LATEST: ${{ steps.release_name.outputs.make_latest }}
+        PRERELEASE: ${{ steps.release_name.outputs.prerelease }}
+      run: bash .github/scripts/publish-github-release.sh
+  publish-dotslash:
+    name: publish-dotslash
+    needs:
+    - release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        persist-credentials: false
+    - uses: ./.github/actions/publish-dotslash
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag: ${{ github.ref_name }}
+        configs: '.github/dotslash-config.json
+
+          .github/dotslash-argument-comment-lint-config.json
+
+          '
+    - name: Publish the provisioned macOS package manifest
+      if: vars.CODEX_PROVISIONED_MACOS_CANDIDATE == 'true'
+      uses: facebook/dotslash-publish-release@9c9ec027515c34db9282a09a25a9cab5880b2c52
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag: ${{ github.ref_name }}
+        config: .github/dotslash-provisioned-config.json
+  publish-npm:
+    concurrency:
+      group: rust-release
+      cancel-in-progress: false
+    name: publish-npm
+    needs:
+    - release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        persist-credentials: false
+    - name: Setup Node.js
+      uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
+      with:
+        node-version-file: .nvmrc
+        registry-url: https://registry.npmjs.org
+    - name: Download npm tarballs from release
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        RELEASE_TAG: ${{ needs.release.outputs.tag }}
+        RELEASE_VERSION: ${{ needs.release.outputs.version }}
+      run: "set -euo pipefail\nversion=\"$RELEASE_VERSION\"\ntag=\"$RELEASE_TAG\"\n\
+        mkdir -p dist/npm\npatterns=(\n  \"zaino-npm-${version}.tgz\"\n  \"zaino-npm-linux-*-${version}.tgz\"\
+        \n  \"zaino-npm-darwin-*-${version}.tgz\"\n  \"zaino-npm-win32-*-${version}.tgz\"\
+        \n  \"codex-responses-api-proxy-npm-${version}.tgz\"\n  \"codex-sdk-npm-${version}.tgz\"\
+        \n)\nfor pattern in \"${patterns[@]}\"; do\n  gh release download \"$tag\"\
+        \ \\\n    --repo \"${GITHUB_REPOSITORY}\" \\\n    --pattern \"$pattern\" \\\
+        \n    --dir dist/npm\ndone\n"
+    - name: Publish to npm
+      env:
+        VERSION: ${{ needs.release.outputs.version }}
+        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        NPM_TAG: ${{ needs.release.outputs.npm_tag }}
+        NPM_CONFIG_LOGLEVEL: verbose
+        NPM_CONFIG_LOGS_DIR: ${{ runner.temp }}/npm-publish-logs
+        NPM_CONFIG_LOGS_MAX: '100'
+      run: "set -euo pipefail\nprefix=\"\"\nif [[ -n \"${NPM_TAG}\" ]]; then\n  prefix=\"\
+        ${NPM_TAG}-\"\nfi\n\nroot_tarball=\"dist/npm/zaino-npm-${VERSION}.tgz\"\n\
+        sdk_tarball=\"dist/npm/codex-sdk-npm-${VERSION}.tgz\"\n# Keep this list in\
+        \ sync with ZAINO_PLATFORM_PACKAGES in\n# codex-cli/scripts/build_npm_package.py.\
+        \ The root wrapper advances\n# @zaino/cli@latest as soon as it publishes,\
+        \ so every platform\n# package it aliases must already exist in the registry\
+        \ first.\nplatform_tarballs=(\n  \"dist/npm/zaino-npm-linux-x64-${VERSION}.tgz\"\
+        \n  \"dist/npm/zaino-npm-linux-arm64-${VERSION}.tgz\"\n  \"dist/npm/zaino-npm-darwin-x64-${VERSION}.tgz\"\
+        \n  \"dist/npm/zaino-npm-darwin-arm64-${VERSION}.tgz\"\n  \"dist/npm/zaino-npm-win32-x64-${VERSION}.tgz\"\
+        \n  \"dist/npm/zaino-npm-win32-arm64-${VERSION}.tgz\"\n)\n\n# A platform the\
+        \ build did not produce has no tarball. That is not\n# fatal: its optionalDependency\
+        \ simply resolves to nothing and npm\n# installs the matching platform package\
+        \ on the platforms that exist.\n# The root tarball, however, must be present.\n\
+        if [[ ! -f \"${root_tarball}\" ]]; then\n  echo \"Missing root npm tarball:\
+        \ ${root_tarball}\"\n  exit 1\nfi\nfor platform_tarball in \"${platform_tarballs[@]}\"\
+        ; do\n  if [[ ! -f \"${platform_tarball}\" ]]; then\n    echo \"::warning\
+        \ title=Platform not built::${platform_tarball##*/} is absent; skipping that\
+        \ platform's publish\"\n  fi\ndone\n\nshopt -s nullglob\nother_tarballs=()\n\
+        for tarball in dist/npm/*-\"${VERSION}\".tgz; do\n  if [[ \"${tarball}\" ==\
+        \ \"${root_tarball}\" || \"${tarball}\" == \"${sdk_tarball}\" ]]; then\n \
+        \   continue\n  fi\n\n  is_platform_tarball=false\n  for platform_tarball\
+        \ in \"${platform_tarballs[@]}\"; do\n    if [[ \"${tarball}\" == \"${platform_tarball}\"\
+        \ ]]; then\n      is_platform_tarball=true\n      break\n    fi\n  done\n\
+        \  if [[ \"${is_platform_tarball}\" == true ]]; then\n    continue\n  fi\n\
+        \n  other_tarballs+=(\"${tarball}\")\ndone\n\n# npm returns HTTP 409 when\
+        \ concurrent publishes update the same\n# packument. Every platform tarball\
+        \ is a version of @zaino/cli,\n# so publish all tarballs serially.\ntarballs=(\n\
+        \  \"${platform_tarballs[@]}\"\n  \"${other_tarballs[@]}\"\n  \"${root_tarball}\"\
+        \n)\n# The SDK depends on this exact root package version.\nif [[ -f \"${sdk_tarball}\"\
+        \ ]]; then\n  tarballs+=(\"${sdk_tarball}\")\nfi\n\nfor tarball in \"${tarballs[@]}\"\
+        ; do\n  filename=\"$(basename \"${tarball}\")\"\n  tag=\"\"\n\n  case \"${filename}\"\
+        \ in\n    zaino-npm-linux-*-\"${VERSION}\".tgz|zaino-npm-darwin-*-\"${VERSION}\"\
+        .tgz|zaino-npm-win32-*-\"${VERSION}\".tgz)\n      platform=\"${filename#zaino-npm-}\"\
+        \n      platform=\"${platform%-${VERSION}.tgz}\"\n      tag=\"${prefix}${platform}\"\
+        \n      ;;\n    zaino-npm-\"${VERSION}\".tgz|codex-responses-api-proxy-npm-\"\
+        ${VERSION}\".tgz|codex-sdk-npm-\"${VERSION}\".tgz)\n      tag=\"${NPM_TAG}\"\
+        \n      ;;\n    *)\n      echo \"Unexpected npm tarball: ${filename}\"\n \
+        \     exit 1\n      ;;\n  esac\n\n  # The publication workflow holds the lock\
+        \ from this lookup through\n  # publish, including concurrent releases from\
+        \ other version lines.\n  tag=\"$(python3 .github/scripts/npm_alpha_tag.py\
+        \ \"${tarball}\" \"${VERSION}\" \"${tag:-latest}\")\"\n\n  publish_cmd=(npm\
+        \ publish \"${GITHUB_WORKSPACE}/${tarball}\")\n  if [[ -n \"${tag}\" ]]; then\n\
+        \    publish_cmd+=(--tag \"${tag}\")\n  fi\n\n  # A fresh npm process re-reads\
+        \ the token on each attempt.\n  for attempt in 1 2 3; do\n    echo \"+ ${publish_cmd[*]}\
+        \ (attempt ${attempt}/3)\"\n    set +e\n    publish_output=\"$(\"${publish_cmd[@]}\"\
+        \ 2>&1)\"\n    publish_status=$?\n    set -e\n\n    echo \"${publish_output}\"\
+        \n    if [[ ${publish_status} -eq 0 ]]; then\n      break\n    fi\n\n    if\
+        \ grep -qiE \"previously published|cannot publish over|version already exists\"\
+        \ <<< \"${publish_output}\"; then\n      echo \"Skipping already-published\
+        \ package version for ${filename}\"\n      break\n    fi\n\n    if [[ ${attempt}\
+        \ -eq 3 ]]; then\n      exit \"${publish_status}\"\n    fi\n    delay=$((attempt\
+        \ * 10))\n    echo \"Publishing ${filename} failed; retrying in ${delay} seconds.\"\
+        \n    sleep \"${delay}\"\n  done\ndone\n"
+    - name: Retain npm debug logs
+      if: always()
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: npm-publish-logs-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/npm-publish-logs/
+        if-no-files-found: ignore
+        retention-days: 7
+  deploy-dev-website:
+    name: Trigger developers site deploy
+    needs:
+    - release
+    if: false
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions: {}
+    environment:
+      name: dev-website-vercel-deploy
+    steps:
+    - name: Trigger developers.openai.com deploy
+      continue-on-error: true
+      env:
+        DEV_WEBSITE_VERCEL_DEPLOY_HOOK_URL: ${{ secrets.DEV_WEBSITE_VERCEL_DEPLOY_HOOK_URL
+          }}
+      run: "if ! curl -sS -f -o /dev/null -X POST \"$DEV_WEBSITE_VERCEL_DEPLOY_HOOK_URL\"\
+        ; then\n  echo \"::warning title=developers.openai.com deploy hook failed::Vercel\
+        \ deploy hook POST failed for ${GITHUB_REF_NAME}\"\n  exit 1\nfi\n"
+  winget:
+    concurrency:
+      group: rust-release
+      cancel-in-progress: false
+    name: winget
+    needs:
+    - release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    environment:
+      name: mainline-release-winget
+    steps:
+    - name: Install cargo-binstall
+      uses: cargo-bins/cargo-binstall@b874e25ea559687bec77e281e9b271aa1367b624
+      with:
+        version: 1.23.0
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+    - name: Install komac
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: cargo-binstall komac --version 2.16.0 --no-confirm
+    - name: Publish to WinGet
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GITHUB_TOKEN: ${{ secrets.WINGET_PUBLISH_PAT }}
+        RELEASE_VERSION: ${{ needs.release.outputs.version }}
+        RELEASE_TAG: ${{ needs.release.outputs.tag }}
+        KOMAC_FORK_OWNER: openai-oss-forks
+        KOMAC_CREATED_WITH: Zaino release workflow
+        KOMAC_CREATED_WITH_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{
+          github.run_id }}
+      run: "set -euo pipefail\ninstaller_urls=\"$(gh release view \"$RELEASE_TAG\"\
+        \ --repo \"$GITHUB_REPOSITORY\" \\\n  --json assets \\\n  --jq '.assets[]\
+        \ | select(.name | test(\"^zaino-(x86_64|aarch64)-pc-windows-msvc\\\\.exe\\\
+        \\.zip$\")) | .url')\"\nmapfile -t urls <<< \"$installer_urls\"\nif [[ ${#urls[@]}\
+        \ -ne 2 ]]; then\n  echo \"::error::Expected x86_64 and aarch64 Windows archives\
+        \ for $RELEASE_TAG\"\n  exit 1\nfi\nkomac sync-fork\nkomac update Zaino.Zaino\
+        \ --version \"$RELEASE_VERSION\" --submit --urls \"${urls[@]}\"\nkomac cleanup\
+        \ --only-merged\n"
+  update-branch:
+    concurrency:
+      group: rust-release
+      cancel-in-progress: false
+    name: Update latest-alpha-cli branch
+    permissions:
+      contents: write
+    needs:
+    - release
+    - publish-npm
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        persist-credentials: false
+    - name: Determine whether to update the GitHub canary branch
+      id: github_canary
+      shell: bash
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        RELEASE_VERSION: ${{ needs.release.outputs.version }}
+        PYTHONPATH: .github/scripts
+      run: "set -euo pipefail\n# Despite its name, raw+json returns raw TOML. The\
+        \ default response\n# is JSON metadata with the file contents encoded as base64.\n\
+        update=\"$(gh api \"repos/$GITHUB_REPOSITORY/contents/codex-rs/Cargo.toml?ref=latest-alpha-cli\"\
+        \ \\\n  -H 'Accept: application/vnd.github.raw+json' \\\n  | python3 .github/scripts/releases.py\
+        \ \"$RELEASE_VERSION\" --check-github canary)\"\necho \"update=$update\" >>\
+        \ \"$GITHUB_OUTPUT\"\n"
+    - name: Update latest-alpha-cli branch
+      if: success() && steps.github_canary.outputs.update == 'true'
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: "set -euo pipefail\ngh api \\\n  repos/${GITHUB_REPOSITORY}/git/refs/heads/latest-alpha-cli\
+        \ \\\n  -X PATCH \\\n  -f sha=\"${GITHUB_SHA}\" \\\n  -F force=true\n"
+  argument-comment-lint-release-assets:
+    name: argument-comment-lint release assets
+    needs:
+    - tag-check
+    uses: ./.github/workflows/rust-release-argument-comment-lint.yml
+    with:
+      publish: true
