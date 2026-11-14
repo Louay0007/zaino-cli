@@ -13,7 +13,6 @@ jobs:
     runs-on: ${{ matrix.runs_on }}
     environment:
       name: bazel
-      deployment: false
     # Temporary increase from 90 minutes while Cargo and Bazel build paths coexist.
     # Reassess after the transition using Bazel release build timings.
     timeout-minutes: 120
@@ -178,7 +177,6 @@ jobs:
     runs-on: ${{ matrix.runs_on }}
     environment:
       name: bazel
-      deployment: false
     timeout-minutes: 120
     permissions:
       contents: read
@@ -369,7 +367,6 @@ jobs:
     runs-on: ${{ matrix.runs_on }}
     environment:
       name: azure-artifact-signing
-      deployment: false
     timeout-minutes: 120
     permissions:
       contents: read
