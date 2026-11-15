@@ -906,11 +906,17 @@ jobs:
       if: ${{ vars.ZAINO_MACOS_SIGNING != 'true' }}
       shell: bash
       run: "set -euo pipefail\ndest=\"signed-macos/${TARGET}\"\nmkdir -p \"$dest\"\
-        \nsrc=\"target/${TARGET}/release\"\nfor binary in ${{ matrix.binaries }};\
-        \ do\n  if [[ -f \"${src}/${binary}\" ]]; then\n    cp \"${src}/${binary}\"\
-        \ \"${dest}/${binary}\"\n    chmod 0755 \"${dest}/${binary}\"\n  fi\ndone\n"
+        \n# The build job uploads its binaries as an archive; this job downloads and\n\
+        # extracts them under $RUNNER_TEMP, so stage from there. Without signing there\n\
+        # is nothing else to copy.\nsrc=\"${RUNNER_TEMP}/unsigned-macos\"\nfind \"\
+        $src\" -maxdepth 3 -type f | head -20\nfor binary in ${BINARIES}; do\n  found=\"\
+        $(find \"$src\" -type f -name \"${binary}*\" | head -1)\"\n  if [[ -n \"${found}\"\
+        \ ]]; then\n    cp \"$found\" \"${dest}/${binary}\"\n    chmod 0755 \"${dest}/${binary}\"\
+        \n  else\n    echo \"missing ${binary} under ${src}\" >&2\n  fi\ndone\nls\
+        \ -la \"$dest\"\n"
       env:
         TARGET: ${{ matrix.target }}
+        BINARIES: ${{ matrix.binaries }}
     - name: Fetch macOS helpers without signing
       if: ${{ matrix.bundle == 'primary' && vars.ZAINO_MACOS_SIGNING != 'true' }}
       shell: bash
