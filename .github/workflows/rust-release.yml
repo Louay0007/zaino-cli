@@ -950,8 +950,7 @@ jobs:
         if-no-files-found: warn
   package-macos:
     needs: sign-macos-binaries
-    name: Package macOS artifacts - ${{ matrix.target }} - ${{ matrix.bundle }} -
-      ${{ matrix.build-system }}
+    name: Package macOS artifacts - ${{ matrix.target }} - ${{ matrix.bundle }} - ${{ matrix.build-system }}
     runs-on: macos-15
     timeout-minutes: 45
     permissions:
