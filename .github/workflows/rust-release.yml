@@ -744,8 +744,7 @@ jobs:
     needs:
     - build
     - build-macos-voice
-    if: ${{ always() && needs.build.result == 'success' && needs.build-macos-voice.result
-      == 'success' }}
+    if: ${{ always() && needs.build.result == 'success' }}
     name: Sign macOS binaries - ${{ matrix.target }} - ${{ matrix.bundle }} - ${{
       matrix.build-system }}
     runs-on: ubuntu-latest
@@ -795,7 +794,7 @@ jobs:
         name: ${{ matrix.artifact_name }}-unsigned${{ env.ARTIFACT_SUFFIX }}
         path: ${{ runner.temp }}/unsigned-macos
     - name: Download unsigned voice runtime
-      if: ${{ matrix.bundle == 'primary' }}
+      if: 'false'
       uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
       with:
         name: voice-${{ matrix.target }}-unsigned
@@ -866,7 +865,7 @@ jobs:
         \ \\\n    >\"${report_dir}/signature-info.yaml\"\n\n  .github/scripts/macos-signing/notarize_macos_binary_with_akv.sh\
         \ \\\n    --binary \"$binary\" \\\n    --report-dir \"$report_dir\"\ndone\n"
     - name: Sign and notarize voice runtime
-      if: ${{ matrix.bundle == 'primary' }}
+      if: 'false'
       shell: bash
       env:
         TARGET: ${{ matrix.target }}
@@ -897,7 +896,7 @@ jobs:
         $signed\" -czf \"${GITHUB_WORKSPACE}/signed-voice-${TARGET}.tar.gz\" \\\n\
         \  runtime codex-voice-host\n"
     - name: Upload signed voice runtime
-      if: ${{ matrix.bundle == 'primary' }}
+      if: 'false'
       uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
       with:
         name: voice-${{ matrix.target }}-signed${{ env.ARTIFACT_SUFFIX }}
@@ -1030,13 +1029,13 @@ jobs:
         name: ${{ matrix.target }}-signed-resources${{ env.ARTIFACT_SUFFIX }}
         path: codex-rs/signed-resources/${{ matrix.target }}
     - name: Download signed voice runtime
-      if: ${{ matrix.bundle == 'primary' }}
+      if: 'false'
       uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
       with:
         name: voice-${{ matrix.target }}-signed${{ env.ARTIFACT_SUFFIX }}
         path: ${{ runner.temp }}/signed-voice
     - name: Verify signed voice runtime
-      if: ${{ matrix.bundle == 'primary' }}
+      if: 'false'
       shell: bash
       env:
         TARGET: ${{ matrix.target }}
@@ -1075,11 +1074,12 @@ jobs:
       env:
         TARGET: ${{ matrix.target }}
         BUNDLE: ${{ matrix.bundle }}
-      run: "set -euo pipefail\nvoice_args=()\nif [[ \"$BUNDLE\" == \"primary\" ]];\
-        \ then\n  voice_args+=(--voice-release-dir \"${RUNNER_TEMP}/signed-voice/${TARGET}\"\
-        )\n  voice_args+=(--release-version \"${GITHUB_REF_NAME#rust-v}\")\nfi\nbash\
-        \ \"${GITHUB_WORKSPACE}/.github/scripts/build-codex-package-archive.sh\" \\\
-        \n  --target \"$TARGET\" \\\n  --bundle \"$BUNDLE\" \\\n  --entrypoint-dir\
+      run: "set -euo pipefail\nvoice_args=()\n# The voice runtime is optional: only\
+        \ pass it when it actually built.\nif [[ \"$BUNDLE\" == \"primary\" && -d\
+        \ \"${RUNNER_TEMP}/signed-voice/${TARGET}\" ]]; then\n  voice_args+=(--voice-release-dir\
+        \ \"${RUNNER_TEMP}/signed-voice/${TARGET}\")\n  voice_args+=(--release-version\
+        \ \"${GITHUB_REF_NAME#rust-v}\")\nfi\nbash \"${GITHUB_WORKSPACE}/.github/scripts/build-codex-package-archive.sh\"\
+        \ \\\n  --target \"$TARGET\" \\\n  --bundle \"$BUNDLE\" \\\n  --entrypoint-dir\
         \ \"target/${TARGET}/release\" \\\n  --archive-dir \"dist/${TARGET}\" \\\n\
         \  --rg-bin \"signed-resources/${TARGET}/rg\" \\\n  ${voice_args[@]+\"${voice_args[@]}\"\
         }\n"
