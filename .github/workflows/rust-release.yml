@@ -632,33 +632,37 @@ jobs:
         \  if [[ \"${is_platform_tarball}\" == true ]]; then\n    continue\n  fi\n\
         \n  other_tarballs+=(\"${tarball}\")\ndone\n\n# npm returns HTTP 409 when\
         \ concurrent publishes update the same\n# packument. Every platform tarball\
-        \ is a version of @zaino/cli,\n# so publish all tarballs serially.\ntarballs=(\n\
-        \  \"${platform_tarballs[@]}\"\n  \"${other_tarballs[@]}\"\n  \"${root_tarball}\"\
-        \n)\n# The SDK depends on this exact root package version.\nif [[ -f \"${sdk_tarball}\"\
-        \ ]]; then\n  tarballs+=(\"${sdk_tarball}\")\nfi\n\nfor tarball in \"${tarballs[@]}\"\
-        ; do\n  filename=\"$(basename \"${tarball}\")\"\n  tag=\"\"\n\n  case \"${filename}\"\
-        \ in\n    zaino-npm-linux-*-\"${VERSION}\".tgz|zaino-npm-darwin-*-\"${VERSION}\"\
-        .tgz|zaino-npm-win32-*-\"${VERSION}\".tgz)\n      platform=\"${filename#zaino-npm-}\"\
-        \n      platform=\"${platform%-${VERSION}.tgz}\"\n      tag=\"${prefix}${platform}\"\
-        \n      ;;\n    zaino-npm-\"${VERSION}\".tgz|codex-responses-api-proxy-npm-\"\
-        ${VERSION}\".tgz|codex-sdk-npm-\"${VERSION}\".tgz)\n      tag=\"${NPM_TAG}\"\
-        \n      ;;\n    *)\n      echo \"Unexpected npm tarball: ${filename}\"\n \
-        \     exit 1\n      ;;\n  esac\n\n  # The publication workflow holds the lock\
-        \ from this lookup through\n  # publish, including concurrent releases from\
-        \ other version lines.\n  tag=\"$(python3 .github/scripts/npm_alpha_tag.py\
-        \ \"${tarball}\" \"${VERSION}\" \"${tag:-latest}\")\"\n\n  publish_cmd=(npm\
-        \ publish \"${GITHUB_WORKSPACE}/${tarball}\")\n  if [[ -n \"${tag}\" ]]; then\n\
-        \    publish_cmd+=(--tag \"${tag}\")\n  fi\n\n  # A fresh npm process re-reads\
-        \ the token on each attempt.\n  for attempt in 1 2 3; do\n    echo \"+ ${publish_cmd[*]}\
-        \ (attempt ${attempt}/3)\"\n    set +e\n    publish_output=\"$(\"${publish_cmd[@]}\"\
-        \ 2>&1)\"\n    publish_status=$?\n    set -e\n\n    echo \"${publish_output}\"\
-        \n    if [[ ${publish_status} -eq 0 ]]; then\n      break\n    fi\n\n    if\
-        \ grep -qiE \"previously published|cannot publish over|version already exists\"\
-        \ <<< \"${publish_output}\"; then\n      echo \"Skipping already-published\
-        \ package version for ${filename}\"\n      break\n    fi\n\n    if [[ ${attempt}\
-        \ -eq 3 ]]; then\n      exit \"${publish_status}\"\n    fi\n    delay=$((attempt\
-        \ * 10))\n    echo \"Publishing ${filename} failed; retrying in ${delay} seconds.\"\
-        \n    sleep \"${delay}\"\n  done\ndone\n"
+        \ is a version of @zaino/cli,\n# so publish all tarballs serially.\n# Only\
+        \ publish tarballs that exist: a platform the build did not produce\n# has\
+        \ no package, and `npm publish` on a missing file aborts the run.\ntarballs=()\n\
+        for platform_tarball in \"${platform_tarballs[@]}\"; do\n  [[ -f \"${platform_tarball}\"\
+        \ ]] && tarballs+=(\"${platform_tarball}\")\ndone\ntarballs+=(\"${other_tarballs[@]}\"\
+        )\ntarballs+=(\"${root_tarball}\")\n# The SDK depends on this exact root package\
+        \ version.\nif [[ -f \"${sdk_tarball}\" ]]; then\n  tarballs+=(\"${sdk_tarball}\"\
+        )\nfi\n\nfor tarball in \"${tarballs[@]}\"; do\n  filename=\"$(basename \"\
+        ${tarball}\")\"\n  tag=\"\"\n\n  case \"${filename}\" in\n    zaino-npm-linux-*-\"\
+        ${VERSION}\".tgz|zaino-npm-darwin-*-\"${VERSION}\".tgz|zaino-npm-win32-*-\"\
+        ${VERSION}\".tgz)\n      platform=\"${filename#zaino-npm-}\"\n      platform=\"\
+        ${platform%-${VERSION}.tgz}\"\n      tag=\"${prefix}${platform}\"\n      ;;\n\
+        \    zaino-npm-\"${VERSION}\".tgz|codex-responses-api-proxy-npm-\"${VERSION}\"\
+        .tgz|codex-sdk-npm-\"${VERSION}\".tgz)\n      tag=\"${NPM_TAG}\"\n      ;;\n\
+        \    *)\n      echo \"Unexpected npm tarball: ${filename}\"\n      exit 1\n\
+        \      ;;\n  esac\n\n  # The publication workflow holds the lock from this\
+        \ lookup through\n  # publish, including concurrent releases from other version\
+        \ lines.\n  tag=\"$(python3 .github/scripts/npm_alpha_tag.py \"${tarball}\"\
+        \ \"${VERSION}\" \"${tag:-latest}\")\"\n\n  publish_cmd=(npm publish \"${GITHUB_WORKSPACE}/${tarball}\"\
+        )\n  if [[ -n \"${tag}\" ]]; then\n    publish_cmd+=(--tag \"${tag}\")\n \
+        \ fi\n\n  # A fresh npm process re-reads the token on each attempt.\n  for\
+        \ attempt in 1 2 3; do\n    echo \"+ ${publish_cmd[*]} (attempt ${attempt}/3)\"\
+        \n    set +e\n    publish_output=\"$(\"${publish_cmd[@]}\" 2>&1)\"\n    publish_status=$?\n\
+        \    set -e\n\n    echo \"${publish_output}\"\n    if [[ ${publish_status}\
+        \ -eq 0 ]]; then\n      break\n    fi\n\n    if grep -qiE \"previously published|cannot\
+        \ publish over|version already exists\" <<< \"${publish_output}\"; then\n\
+        \      echo \"Skipping already-published package version for ${filename}\"\
+        \n      break\n    fi\n\n    if [[ ${attempt} -eq 3 ]]; then\n      exit \"\
+        ${publish_status}\"\n    fi\n    delay=$((attempt * 10))\n    echo \"Publishing\
+        \ ${filename} failed; retrying in ${delay} seconds.\"\n    sleep \"${delay}\"\
+        \n  done\ndone\n"
     - name: Retain npm debug logs
       if: always()
       uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f

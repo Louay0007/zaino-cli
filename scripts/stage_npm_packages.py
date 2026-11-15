@@ -252,6 +252,7 @@ def select_target_artifacts(
         artifact.name: artifact for artifact in list_workflow_artifacts(workflow_id)
     }
     selected_artifacts: list[WorkflowArtifact] = []
+    missing_targets: list[str] = []
     for target in BINARY_TARGETS:
         for artifact_name in [target, f"{target}-unsigned"]:
             artifact = artifacts_by_name.get(artifact_name)
@@ -259,9 +260,22 @@ def select_target_artifacts(
                 selected_artifacts.append(artifact)
                 break
         else:
-            raise FileNotFoundError(
-                f"Expected workflow artifact not found for target {target}"
-            )
+            # A target the release does not build has no artifact. Its npm
+            # optionalDependency simply resolves to nothing, so skip it rather
+            # than failing the whole publish for the platforms that did build.
+            missing_targets.append(target)
+
+    if missing_targets:
+        print(
+            "Skipping targets with no workflow artifact: "
+            + ", ".join(missing_targets),
+            flush=True,
+        )
+    if not selected_artifacts:
+        raise FileNotFoundError(
+            "No workflow artifacts found for any target: "
+            + ", ".join(BINARY_TARGETS)
+        )
 
     return selected_artifacts
 
@@ -591,6 +605,21 @@ def main() -> int:
             print(f"should `git checkout {resolved_head_sha}`", flush=True)
 
         for package in packages:
+            # Skip a platform package whose target was never built: there is no
+            # vendor directory for it, and packaging would abort the whole run.
+            platform = _BUILD_MODULE.ZAINO_PLATFORM_PACKAGES.get(package)
+            if platform is not None:
+                triple = platform["target_triple"]
+                vendor_src = vendor_src_by_components.get(
+                    native_components_for_package(package)
+                )
+                if vendor_src is None or not (vendor_src / triple).is_dir():
+                    print(
+                        f"Skipping {package}: no vendor directory for {triple}",
+                        flush=True,
+                    )
+                    continue
+
             staging_dir = Path(
                 tempfile.mkdtemp(prefix=f"npm-stage-{package}-", dir=runner_temp)
             )
