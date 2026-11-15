@@ -87,27 +87,27 @@ jobs:
           artifact_name: x86_64-apple-darwin-app-server
           binaries: codex-app-server codex-code-mode-host codex-exec-server
           build_dmg: 'false'
-        - runner: ${{ github.event.repository.name }}-linux-x64-xl
+        - runner: ubuntu-latest
           target: x86_64-unknown-linux-musl
           bundle: primary
           artifact_name: x86_64-unknown-linux-musl
           binaries: zaino codex-code-mode-host codex-exec-server codex-responses-api-proxy
             bwrap
           build_dmg: 'false'
-        - runner: ${{ github.event.repository.name }}-linux-x64-xl
+        - runner: ubuntu-latest
           target: x86_64-unknown-linux-musl
           bundle: app-server
           artifact_name: x86_64-unknown-linux-musl-app-server
           binaries: codex-app-server codex-code-mode-host codex-exec-server
           build_dmg: 'false'
-        - runner: ${{ github.event.repository.name }}-linux-arm64
+        - runner: ubuntu-24.04-arm
           target: aarch64-unknown-linux-musl
           bundle: primary
           artifact_name: aarch64-unknown-linux-musl
           binaries: zaino codex-code-mode-host codex-exec-server codex-responses-api-proxy
             bwrap
           build_dmg: 'false'
-        - runner: ${{ github.event.repository.name }}-linux-arm64
+        - runner: ubuntu-24.04-arm
           target: aarch64-unknown-linux-musl
           bundle: app-server
           artifact_name: aarch64-unknown-linux-musl-app-server
