@@ -174,14 +174,13 @@ impl OnboardingScreen {
         if show_login_screen {
             // Zaino ships with the `zaino` provider as the default, so an API key is the
             // path that works out of the box; ChatGPT sign-in stays available below it.
-            let highlighted_mode =
-                if auth_config.is_login_method_allowed(ForcedLoginMethod::Api) {
-                    SignInOption::ApiKey
-                } else if auth_config.is_login_method_allowed(ForcedLoginMethod::Chatgpt) {
-                    SignInOption::ChatGpt
-                } else {
-                    SignInOption::OtherMethods
-                };
+            let highlighted_mode = if auth_config.is_login_method_allowed(ForcedLoginMethod::Api) {
+                SignInOption::ApiKey
+            } else if auth_config.is_login_method_allowed(ForcedLoginMethod::Chatgpt) {
+                SignInOption::ChatGpt
+            } else {
+                SignInOption::OtherMethods
+            };
             if let Some(app_server_request_handle) = app_server_request_handle {
                 steps.push(Step::Auth(AuthModeWidget {
                     request_frame: tui.frame_requester(),

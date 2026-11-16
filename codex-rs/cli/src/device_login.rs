@@ -109,10 +109,15 @@ pub async fn request_device_code(origin: &str) -> std::io::Result<DeviceLogin> {
     let body = serde_json::json!({ "device_name": device_name() }).to_string();
     let (status, text) = post_json(&client, &format!("{origin}/api/auth/device"), body).await?;
     if !(200..300).contains(&status) {
-        return Err(std::io::Error::other(portal_error_message("start device login", status, &text)));
+        return Err(std::io::Error::other(portal_error_message(
+            "start device login",
+            status,
+            &text,
+        )));
     }
-    let parsed: DeviceStartResp = serde_json::from_str(&text)
-        .map_err(|e| std::io::Error::other(format!("portal returned an unexpected response: {e}")))?;
+    let parsed: DeviceStartResp = serde_json::from_str(&text).map_err(|e| {
+        std::io::Error::other(format!("portal returned an unexpected response: {e}"))
+    })?;
     Ok(DeviceLogin {
         device_code: parsed.device_code,
         user_code: parsed.user_code,
@@ -144,8 +149,9 @@ pub async fn wait_for_api_key(origin: &str, flow: &DeviceLogin) -> std::io::Resu
         };
 
         if (200..300).contains(&status) {
-            let parsed: TokenResp = serde_json::from_str(&text)
-                .map_err(|e| std::io::Error::other(format!("portal returned an unexpected response: {e}")))?;
+            let parsed: TokenResp = serde_json::from_str(&text).map_err(|e| {
+                std::io::Error::other(format!("portal returned an unexpected response: {e}"))
+            })?;
             if let Some(token) = parsed.token.filter(|t| !t.trim().is_empty()) {
                 return Ok(token.trim().to_string());
             }
@@ -167,15 +173,21 @@ pub async fn wait_for_api_key(origin: &str, flow: &DeviceLogin) -> std::io::Resu
                 continue;
             }
             "access_denied" => {
-                return Err(std::io::Error::other("the request was denied in the browser"));
+                return Err(std::io::Error::other(
+                    "the request was denied in the browser",
+                ));
             }
             "expired_token" => {
-                return Err(std::io::Error::other("the code expired before it was approved"));
+                return Err(std::io::Error::other(
+                    "the code expired before it was approved",
+                ));
             }
             _ => {
                 let detail = code
                     .and_then(|(_, m)| (!m.is_empty()).then_some(m))
-                    .unwrap_or_else(|| portal_error_message("complete device login", status, &text));
+                    .unwrap_or_else(|| {
+                        portal_error_message("complete device login", status, &text)
+                    });
                 return Err(std::io::Error::other(detail));
             }
         }

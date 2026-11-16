@@ -24,6 +24,8 @@ def _codex_release_repository_impl(repository_ctx):
     if not releases:
         fail("Set CODEX_COMPAT_RELEASES to the JSON from resolve_exec_server_releases.py before building release compatibility targets.")
     release = json.decode(releases)[repository_ctx.attr.release]
+    if release == None:
+        fail("No {} release is available: this repository has published no rust-v release to compare against. Publish one, then rerun resolve_exec_server_releases.py.".format(repository_ctx.attr.release))
     asset = "codex-package-x86_64-unknown-linux-musl.tar.gz"
     version = release["version"]
     repository_ctx.download_and_extract(

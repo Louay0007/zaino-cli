@@ -7,7 +7,6 @@ use codex_protocol::models::PermissionProfile;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;
 
-use super::ZAINO_HOME_FLAG;
 use super::CODEX_WINDOWS_SANDBOX_ARG1;
 use super::COMMAND_CWD_FLAG;
 use super::DENY_READ_PATHS_JSON_FLAG;
@@ -23,6 +22,7 @@ use super::READ_ROOTS_JSON_FLAG;
 use super::SANDBOX_LEVEL_FLAG;
 use super::WORKSPACE_ROOT_FLAG;
 use super::WRITE_ROOTS_JSON_FLAG;
+use super::ZAINO_HOME_FLAG;
 use super::create_windows_sandbox_command_args_for_permission_profile;
 use super::parse_windows_sandbox_wrapper_args;
 

@@ -41,12 +41,23 @@ exec_server_compat_test(
 )
 
 # Preparation selects both releases; the normal Bazel test invocation runs them.
+# Both are `manual` because they download a previously published release
+# package, and this tree has not published one yet, so a `//...` wildcard must
+# not try to resolve them.
 exec_server_compat_test(
     name = "exec-server-stable-release-test",
     release = "@codex_release_latest_stable",
+    tags = [
+        "manual",
+        "no-sandbox",
+    ],
 )
 
 exec_server_compat_test(
     name = "exec-server-historical-release-test",
     release = "@codex_release_historical_stable",
+    tags = [
+        "manual",
+        "no-sandbox",
+    ],
 )

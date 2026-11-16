@@ -555,10 +555,7 @@ impl AuthModeWidget {
             vec!["  Choose how you want to use Zaino.".into(), "".into()]
         } else {
             vec![
-                Line::from(vec![
-                    "  ".into(),
-                    "Sign in with your Zaino API key".into(),
-                ]),
+                Line::from(vec!["  ".into(), "Sign in with your Zaino API key".into()]),
                 Line::from(vec![
                     "  ".into(),
                     "Create one at https://zaino.soon.it".into(),

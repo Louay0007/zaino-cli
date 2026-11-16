@@ -358,8 +358,7 @@ pub async fn run_login_with_device_code_portal(
     let _login_log_guard = init_login_file_logging(&config);
     tracing::info!("starting portal device login flow");
 
-    let origin = portal_origin
-        .unwrap_or_else(|| crate::device_login::PORTAL_ORIGIN.to_string());
+    let origin = portal_origin.unwrap_or_else(|| crate::device_login::PORTAL_ORIGIN.to_string());
     let origin = origin.trim_end_matches('/').to_string();
 
     let flow = match crate::device_login::request_device_code(&origin).await {

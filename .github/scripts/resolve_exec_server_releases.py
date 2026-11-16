@@ -16,7 +16,18 @@ STABLE_LOOKBACK_DAYS = 60
 
 def main() -> None:
     target_date = datetime.now(timezone.utc) - timedelta(days=STABLE_LOOKBACK_DAYS)
-    tags = select_stables(list_releases(exclude_prereleases=True), target_date)
+    try:
+        tags = select_stables(list_releases(exclude_prereleases=True), target_date)
+    except ValueError:
+        # This fork has published no rust-v release yet, so there is no released
+        # build to compare against. Emitting empty markers keeps every Bazel
+        # caller running; the release-compat targets then have nothing to fetch.
+        print(
+            "Compatibility releases: none published yet; skipping release-compat tests",
+            file=sys.stderr,
+        )
+        print(json.dumps({"latest": None, "historical": None}))
+        return
     releases = {}
     for tag in tags:
         metadata = json.loads(

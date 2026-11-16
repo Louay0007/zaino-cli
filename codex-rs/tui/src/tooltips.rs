@@ -19,10 +19,12 @@ const ANNOUNCEMENT_TIP_URL: &str =
 const IS_MACOS: bool = cfg!(target_os = "macos");
 const IS_WINDOWS: bool = cfg!(target_os = "windows");
 
-const WINDOWS_APP_TOOLTIP: &str = "Use the **desktop app**. Install it from https://zaino.soon.it/download and run `zaino app`.";
+const WINDOWS_APP_TOOLTIP: &str =
+    "Use the **desktop app**. Install it from https://zaino.soon.it/download and run `zaino app`.";
 const MACOS_APP_TOOLTIP: &str =
     "Use the **desktop app**. Run `zaino app` to open it. It installs automatically if needed.";
-const LINUX_APP_TOOLTIP: &str = "Use the **desktop app**. Install it from https://zaino.soon.it/download and run `zaino`.";
+const LINUX_APP_TOOLTIP: &str =
+    "Use the **desktop app**. Install it from https://zaino.soon.it/download and run `zaino`.";
 
 const RAW_TOOLTIPS: &str = include_str!("../assets/tooltips.txt");
 

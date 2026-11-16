@@ -36,7 +36,8 @@ const VERSION_FILE_NAME: &str = "version.json";
 // Zaino does not publish CLI releases to GitHub or Homebrew; the package ships
 // on npm. Pointing these at `openai/codex` reported a stranger's version as
 // "the latest Zaino" and offered to install Codex over Zaino.
-const GITHUB_LATEST_RELEASE_URL: &str = "https://api.github.com/repos/Louay0007/zaino-cli/releases/latest";
+const GITHUB_LATEST_RELEASE_URL: &str =
+    "https://api.github.com/repos/Louay0007/zaino-cli/releases/latest";
 const HOMEBREW_CASK_API_URL: &str = "https://formulae.brew.sh/api/cask/zaino.json";
 #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
 const DESKTOP_UPDATE_URL: &str = "https://zaino.soon.it/appcast-x64.xml";
