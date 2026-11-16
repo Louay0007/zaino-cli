@@ -167,9 +167,6 @@ members = [
     "codex-experimental-api-macros",
     "plugin",
     "model-provider",
-    # Has a BUILD.bazel, so Bazel needs it in the generated crate metadata that
-    # codex_rust_crate looks up by package name.
-    "v8-poc",
 ]
 resolver = "2"
 

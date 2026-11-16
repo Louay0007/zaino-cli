@@ -5648,14 +5648,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "codex-v8-poc"
-version = "1.0.0"
-dependencies = [
- "pretty_assertions",
- "v8",
-]
-
-[[package]]
 name = "codex-voice-host"
 version = "1.0.0"
 dependencies = [
