@@ -1031,6 +1031,7 @@ jobs:
         \ in rg; do\n  resource_path=\"signed-resources/${{ matrix.target }}/${resource}\"\
         \n  chmod 0755 \"$resource_path\"\n  codesign --verify --strict --verbose=2\
         \ \"$resource_path\"\ndone\n"
+      if: ${{ vars.ZAINO_MACOS_SIGNING == 'true' }}
     - name: Stage macOS artifacts
       shell: bash
       run: "set -euo pipefail\ndest=\"dist/${{ matrix.target }}\"\nmkdir -p \"$dest\"\
@@ -1056,7 +1057,7 @@ jobs:
         \  --rg-bin \"signed-resources/${TARGET}/rg\" \\\n  ${voice_args[@]+\"${voice_args[@]}\"\
         }\n"
     - name: Build unsigned macOS DMG
-      if: ${{ matrix.build_dmg == 'true' }}
+      if: 'false'
       shell: bash
       run: "set -euo pipefail\n\ntarget=\"${{ matrix.target }}\"\nrelease_dir=\"target/${target}/release\"\
         \ndmg_root=\"${RUNNER_TEMP}/codex-dmg-root-${target}\"\nvolname=\"Zaino (${target})\"\
@@ -1074,7 +1075,7 @@ jobs:
         \ \\\n  \"$dmg_path\"\n\nif [[ ! -f \"$dmg_path\" ]]; then\n  echo \"DMG $dmg_path\
         \ not found after build\"\n  exit 1\nfi\n"
     - name: Upload unsigned macOS DMG
-      if: ${{ matrix.build_dmg == 'true' }}
+      if: 'false'
       uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
       with:
         name: ${{ matrix.artifact_name }}-unsigned-dmg${{ env.ARTIFACT_SUFFIX }}
