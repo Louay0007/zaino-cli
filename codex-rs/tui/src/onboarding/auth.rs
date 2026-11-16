@@ -549,7 +549,7 @@ impl AuthModeWidget {
 
     fn render_pick_mode(&self, area: Rect, buf: &mut Buffer) {
         let mut lines: Vec<Line> = if self.highlighted_mode.is_alternative() {
-            vec!["  Choose how you want to use Zaino.".into(), "".into()]
+            vec!["  Sign in another way".into(), "".into()]
         } else if self.bedrock_setup_enabled || self.gcp_setup_enabled || self.gateway_setup_enabled
         {
             vec!["  Choose how you want to use Zaino.".into(), "".into()]
