@@ -194,7 +194,22 @@ jobs:
             export CARGO_BUILD_JOBS=4
           fi
           printf '%s\n' "$CODEX_VOICE_RUNTIME_RELATIVE" > "$archive_dir/voice-runtime-path.txt"
+          # code-mode-host/code-mode-runtime are the only crates that pull
+          # rusty_v8, whose prebuilt bindings are not published for these
+          # targets, so resolving them needs a full Chromium checkout and the
+          # build dies on a 404. They are workspace members because the release
+          # builds codex-code-mode-host by name; excluding them here keeps the
+          # test archive off that path.
+          mapfile -t workspace_packages < <(
+            cargo metadata --format-version 1 --no-deps \
+              | python3 -c 'import json,sys; [print(p["name"]) for p in json.load(sys.stdin)["packages"] if p["name"] not in {"codex-code-mode-host","codex-code-mode-runtime"}]'
+          )
+          package_args=()
+          for pkg in "${workspace_packages[@]}"; do
+            package_args+=("--package" "${pkg}")
+          done
           cargo nextest --tool-config-file "codex-voice:$CODEX_VOICE_NEXTEST_CONFIG" archive \
+            "${package_args[@]}" \
             --target "${CODEX_CI_TARGET}" \
             --cargo-profile "${CODEX_CI_PROFILE}" \
             --timings \
