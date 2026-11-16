@@ -689,8 +689,11 @@ jobs:
         - target: aarch64-apple-darwin
           runner: macos-15
           prefix: macos_aarch64
+        # The legacy slice must build on an Intel host. `native_runtime` selects
+        # its platform from the *host*, so an arm64 runner only ever writes
+        # darwin_arm64 outputs and the x86_64 runtime is never produced.
         - target: x86_64-apple-darwin
-          runner: macos-15
+          runner: macos-15-intel
           prefix: macos_x86_64
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -1025,15 +1028,39 @@ jobs:
         \ \"$binary\"\ndone < <(find \"$root/runtime\" -name '*.dylib' -type f -print0)\n\
         lipo \"$root/codex-voice-host\" -verify_arch \"$arch\"\ncodesign --verify\
         \ --strict --verbose=2 \"$root/codex-voice-host\"\n"
-    - name: Verify signed macOS binaries
+    - name: Restore executable bits on downloaded binaries
       shell: bash
-      run: "set -euo pipefail\nfor binary in ${{ matrix.binaries }}; do\n  binary_path=\"\
-        target/${{ matrix.target }}/release/${binary}\"\n  chmod 0755 \"$binary_path\"\
-        \n  codesign --verify --strict --verbose=2 \"$binary_path\"\ndone\n\nfor resource\
-        \ in rg; do\n  resource_path=\"signed-resources/${{ matrix.target }}/${resource}\"\
-        \n  chmod 0755 \"$resource_path\"\n  codesign --verify --strict --verbose=2\
-        \ \"$resource_path\"\ndone\n"
+      run: |
+        set -euo pipefail
+        # actions/download-artifact does not preserve the executable bit, and the
+        # package archiver refuses a non-executable entrypoint. Restoring the mode
+        # must not depend on signing, or unsigned releases fail while packaging.
+        for binary in ${{ matrix.binaries }}; do
+          binary_path="target/${{ matrix.target }}/release/${binary}"
+          if [[ -f "$binary_path" ]]; then
+            chmod 0755 "$binary_path"
+          fi
+        done
+
+        for resource in rg; do
+          resource_path="signed-resources/${{ matrix.target }}/${resource}"
+          if [[ -f "$resource_path" ]]; then
+            chmod 0755 "$resource_path"
+          fi
+        done
+
+    - name: Verify signed macOS binaries
       if: ${{ vars.ZAINO_MACOS_SIGNING == 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        for binary in ${{ matrix.binaries }}; do
+          codesign --verify --strict --verbose=2 "target/${{ matrix.target }}/release/${binary}"
+        done
+
+        for resource in rg; do
+          codesign --verify --strict --verbose=2 "signed-resources/${{ matrix.target }}/${resource}"
+        done
     - name: Stage macOS artifacts
       shell: bash
       run: "set -euo pipefail\ndest=\"dist/${{ matrix.target }}\"\nmkdir -p \"$dest\"\
