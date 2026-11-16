@@ -1,22 +1,15 @@
-load("@crates//:data.bzl", "DEP_DATA")
 load("//:defs.bzl", "codex_rust_crate")
 
-# v8-poc is a Bazel-only crate: it is deliberately kept out of `[workspace]
-# members` because its V8 prebuilts are not published for every CI target, so no
-# crate metadata is generated for it. Guarding both targets on that metadata
-# keeps the package loadable during a `//codex-rs/...` walk; CI already excludes
-# these targets (see scripts/list-bazel-*-targets.sh).
-if native.package_name() in DEP_DATA:
-    codex_rust_crate(
-        name = "v8-poc",
-        crate_features = ["sandbox"],
-        crate_name = "codex_v8_poc",
-        deps_extra = ["@crates//:v8"],
-        # Bazel always builds the native pair required by the CppGC ABI checks.
-        unit_test_args = ["--include-ignored"],
-    )
+codex_rust_crate(
+    name = "v8-poc",
+    crate_features = ["sandbox"],
+    crate_name = "codex_v8_poc",
+    deps_extra = ["@crates//:v8"],
+    # Bazel always builds the native pair required by the CppGC ABI checks.
+    unit_test_args = ["--include-ignored"],
+)
 
-    alias(
-        name = "v8-poc-rusty-v8",
-        actual = ":v8-poc",
-    )
+alias(
+    name = "v8-poc-rusty-v8",
+    actual = ":v8-poc",
+)

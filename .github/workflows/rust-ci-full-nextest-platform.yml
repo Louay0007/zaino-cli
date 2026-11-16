@@ -194,15 +194,15 @@ jobs:
             export CARGO_BUILD_JOBS=4
           fi
           printf '%s\n' "$CODEX_VOICE_RUNTIME_RELATIVE" > "$archive_dir/voice-runtime-path.txt"
-          # code-mode-host/code-mode-runtime are the only crates that pull
-          # rusty_v8, whose prebuilt bindings are not published for these
-          # targets, so resolving them needs a full Chromium checkout and the
-          # build dies on a 404. They are workspace members because the release
-          # builds codex-code-mode-host by name; excluding them here keeps the
-          # test archive off that path.
+          # These three crates are the only ones that pull rusty_v8, whose
+          # src_binding prebuilts 404 for these targets, so resolving them needs
+          # a full Chromium checkout and the build dies on the download. They
+          # stay workspace members (the release builds codex-code-mode-host by
+          # name, and v8-poc needs crate metadata for its BUILD file), but the
+          # test archive resolves every other member instead.
           mapfile -t workspace_packages < <(
             cargo metadata --format-version 1 --no-deps \
-              | python3 -c 'import json,sys; [print(p["name"]) for p in json.load(sys.stdin)["packages"] if p["name"] not in {"codex-code-mode-host","codex-code-mode-runtime"}]'
+              | python3 -c 'import json,sys; skip={"codex-code-mode-host","codex-code-mode-runtime","codex-v8-poc"}; [print(p["name"]) for p in json.load(sys.stdin)["packages"] if p["name"] not in skip]'
           )
           package_args=()
           for pkg in "${workspace_packages[@]}"; do

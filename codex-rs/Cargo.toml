@@ -167,6 +167,10 @@ members = [
     "codex-experimental-api-macros",
     "plugin",
     "model-provider",
+    # Bazel-only crate. It must stay a member so the generated crate metadata
+    # that codex_rust_crate looks up by package name exists; the CI archive
+    # excludes it (and the other rusty_v8 crates) from test resolution.
+    "v8-poc",
 ]
 resolver = "2"
 

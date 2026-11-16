@@ -317,16 +317,6 @@ def codex_rust_crate(
     )
 
     package_data = DEP_DATA.get(native.package_name())
-    if package_data == None:
-        # v8-poc is a Bazel-only crate: it is deliberately kept out of
-        # `[workspace] members` because its V8 prebuilts are not published for
-        # every CI target, so no crate metadata is generated for it. CI already
-        # excludes its targets (see scripts/list-bazel-*-targets.sh); returning
-        # here keeps the package loadable so a `//codex-rs/...` walk still works
-        # instead of raising on the missing entry.
-        print("Skipping Bazel crate targets for '%s': no generated crate metadata." % native.package_name())
-        return
-
     rustc_env = {
         "BAZEL_PACKAGE": native.package_name(),
         "CARGO_PKG_NAME": package_data["package_name"],
