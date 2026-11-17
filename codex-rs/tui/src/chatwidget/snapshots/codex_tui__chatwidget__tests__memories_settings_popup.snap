@@ -3,7 +3,7 @@ source: tui/src/chatwidget/tests/popups_and_settings.rs
 expression: popup
 ---
   Memories
-  Choose how Codex uses and creates memories. Changes are saved to config.toml
+  Choose how Zaino uses and creates memories. Changes are saved to config.toml
 
 
 › [x] Use memories       Use memories starting with the next thread
@@ -12,6 +12,6 @@ expression: popup
                          existing threads
 
 
-  Learn more: https://developers.openai.com/codex/memories
+  Learn more: https://github.com/Louay0007/zaino-cli/blob/main/docs/config.md
 
   space toggle · enter save/select · esc cancel

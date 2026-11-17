@@ -3,8 +3,8 @@ source: tui/src/history_cell/tests.rs
 expression: rendered
 ---
 ╭─────────────────────────────────────────────────╮
-│ ✨ Update available! 0.0.0 -> 9.9.9             │
-│ Run pnpm add -g @openai/codex to update.        │
+│ ✨ Update available! 1.0.0 -> 9.9.9             │
+│ Run pnpm add -g @zaino/cli to update.           │
 │                                                 │
 │ See full release notes:                         │
 │ https://github.com/openai/codex/releases/latest │

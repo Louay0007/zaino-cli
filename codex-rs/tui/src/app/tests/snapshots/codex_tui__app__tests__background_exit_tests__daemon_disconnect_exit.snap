@@ -5,5 +5,5 @@ expression: output
 Disconnected from this task. Any running work continues.
 To reconnect, run:
   zaino resume THREAD_ID
-Stop the current turn: run codex agents, select this task, and press f10.
+Stop the current turn: run zaino agents, select this task, and press f10.
 Token usage so far: total=12 input=10 output=2

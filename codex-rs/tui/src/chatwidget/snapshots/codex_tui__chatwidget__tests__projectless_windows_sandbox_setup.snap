@@ -2,8 +2,8 @@
 source: tui/src/chatwidget/tests/permissions.rs
 expression: popup
 ---
-  Set up the Codex agent sandbox to protect your files and control network access. Learn more
-  <https://developers.openai.com/codex/windows>
+  Set up the Zaino agent sandbox to protect your files and control network access. Learn more
+  <https://github.com/Louay0007/zaino-cli/blob/main/docs/config.md>
 
 
 › 1. Set up default sandbox (requires Administrator permissions)

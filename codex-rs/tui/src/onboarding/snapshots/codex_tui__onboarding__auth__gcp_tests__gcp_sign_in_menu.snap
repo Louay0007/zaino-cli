@@ -4,7 +4,7 @@ expression: terminal.backend().to_string()
 ---
   Sign in another way
 
-> 1. Use an OpenAI API key
+> 1. Use a Zaino API key
      Pay for what you use
 
   2. Use Amazon Bedrock

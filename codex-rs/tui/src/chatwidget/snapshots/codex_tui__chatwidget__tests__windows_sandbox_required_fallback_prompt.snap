@@ -4,8 +4,8 @@ expression: popup
 ---
   Couldn't set up your sandbox with Administrator permissions
 
-  Your organization requires the default sandbox before Codex can continue.
-  Learn more <https://developers.openai.com/codex/windows>
+  Your organization requires the default sandbox before Zaino can continue.
+  Learn more <https://github.com/Louay0007/zaino-cli/blob/main/docs/config.md>
 
 
 › 1. Try setting up admin sandbox again

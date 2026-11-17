@@ -1,8 +1,9 @@
 ---
 source: tui/src/history_cell/tests.rs
+expression: "format!(\"Scrollback\\n{scrollback}\\n\\nRedrawable transcript\\n{transcript}\")"
 ---
 Scrollback
-• Sent by Codex from task other
+• Sent by Zaino from task other
   • One
   • This item has enough words
     to wrap
@@ -10,7 +11,7 @@ Scrollback
   • Three
 
 Redrawable transcript
-• Sent by Codex from task other
+• Sent by Zaino from task other
   • One
 
   • This item has enough words
