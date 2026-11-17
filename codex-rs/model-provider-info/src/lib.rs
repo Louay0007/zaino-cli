@@ -744,8 +744,17 @@ other non-default provider fields are not supported"
             .unwrap_or(provider_id == OPENAI_PROVIDER_ID)
     }
 
+    /// Whether this provider is served by Zaino itself rather than a
+    /// third-party or user-defined endpoint. Zaino was a rebrand of the
+    /// first-party client: it fronts the same Responses API, so it keeps every
+    /// OpenAI-only capability (reasoning-effort overrides, cyber access
+    /// programs, remote compaction) that the built-in provider has.
+    pub fn is_zaino(&self) -> bool {
+        self.name == ZAINO_PROVIDER_NAME
+    }
+
     pub fn is_openai(&self) -> bool {
-        self.name == OPENAI_PROVIDER_NAME
+        self.name == OPENAI_PROVIDER_NAME || self.is_zaino()
     }
 
     pub fn supports_codex_backend_routes(&self) -> bool {

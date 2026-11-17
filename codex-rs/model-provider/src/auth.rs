@@ -466,7 +466,16 @@ pub(crate) fn uses_fedramp_api_key(
     if !provider.is_openai() || provider.has_command_auth() {
         return Ok(false);
     }
-    if let Some(auth) = bearer_auth_for_provider(provider)? {
+    // `api_key` turns an unset `env_key` into an error, but this is only a
+    // routing question: a provider whose variable is simply unset is not
+    // FedRAMP, and reporting an error here would block requests that a stored
+    // credential (or an unauthenticated provider) can still serve.
+    let bearer = match bearer_auth_for_provider(provider) {
+        Ok(bearer) => bearer,
+        Err(_) if provider.env_key.is_some() => None,
+        Err(err) => return Err(err),
+    };
+    if let Some(auth) = bearer {
         return Ok(auth.is_fedramp_account);
     }
     Ok(provider.requires_openai_auth
