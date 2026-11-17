@@ -52,7 +52,7 @@ Scenario: Resolved local MXC selection preserves workspace-write permissions in 
       <shell><HOST_SHELL></shell>
       <current_date><CURRENT_DATE></current_date>
       <timezone><HOST_TIMEZONE></timezone>
-      <filesystem><workspace_roots><root><WORKSPACE_ROOT 1></root></workspace_roots><permission_profile type...ntry></file_system></permission_profile></filesystem> [hash=e9b73aecc0d54647]
+      <filesystem><workspace_roots><root><WORKSPACE_ROOT 1></root></workspace_roots><permission_profile type...ntry></file_system></permission_profile></filesystem> [hash=34ed40221555ba13]
     </environment_context>
 03:message/user:
     Inspect the sandbox.
