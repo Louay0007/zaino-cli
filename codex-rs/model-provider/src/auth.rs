@@ -344,11 +344,19 @@ pub(crate) fn resolve_provider_auth(
     auth: Option<&CodexAuth>,
     provider: &ModelProviderInfo,
 ) -> codex_protocol::error::Result<SharedAuthProvider> {
-    if let Some(auth) = bearer_auth_for_provider(provider)? {
-        return Ok(Arc::new(auth));
-    }
+    // A provider with an `env_key` reports a missing variable as a hard error so
+    // the user sees the setup instructions. `zaino login --with-api-key` stores
+    // the same key in auth.json instead, so an existing credential must not be
+    // shadowed by the unset variable. `bearer_auth_for_provider` can only fail
+    // through `api_key`, which only fails when `env_key` is set and unset.
+    let missing_env_key = match bearer_auth_for_provider(provider) {
+        Ok(Some(bearer)) => return Ok(Arc::new(bearer)),
+        Ok(None) => false,
+        Err(_) if auth.is_some() && provider.env_key.is_some() => true,
+        Err(err) => return Err(err),
+    };
 
-    if !provider.requires_openai_auth && provider.auth.is_none() {
+    if !provider.requires_openai_auth && provider.auth.is_none() && !missing_env_key {
         return Ok(unauthenticated_auth_provider());
     }
 
