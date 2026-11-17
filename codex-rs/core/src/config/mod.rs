@@ -4106,6 +4106,7 @@ impl Config {
             .openai_base_url
             .clone()
             .filter(|value| !value.is_empty());
+        let openai_base_url_requested = openai_base_url.is_some();
 
         let mut model_providers =
             merge_configured_model_providers(built_in_model_providers(openai_base_url), cfg.model_providers)
@@ -4118,7 +4119,16 @@ impl Config {
         let model_provider_id = config_layer_stack.required_model_provider().map(str::to_string)
             .or(model_provider)
             .or(cfg.model_provider)
-            .unwrap_or_else(|| ZAINO_PROVIDER_ID.to_string());
+            // `openai_base_url` only rewrites the built-in OpenAI provider, so a
+            // config that sets it without naming a provider still means OpenAI.
+            // Defaulting to Zaino there would silently ignore the override.
+            .unwrap_or_else(|| {
+                if openai_base_url_requested {
+                    OPENAI_PROVIDER_ID.to_string()
+                } else {
+                    ZAINO_PROVIDER_ID.to_string()
+                }
+            });
         let model_provider = model_providers
             .get(&model_provider_id)
             .ok_or_else(|| {
