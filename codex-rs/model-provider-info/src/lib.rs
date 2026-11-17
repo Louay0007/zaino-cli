@@ -95,6 +95,14 @@ pub const ZAINO_PROVIDER_NAME: &str = "Zaino";
 pub const ZAINO_PROVIDER_ID: &str = "zaino";
 pub const ZAINO_BASE_URL: &str = "https://api.zaino.soon.it/v1";
 pub const ZAINO_ENV_KEY: &str = "ZAINO_API_KEY";
+
+/// Whether a configured provider ID names a first-party endpoint.
+///
+/// Zaino rebranded the first-party client and is the default provider, so it
+/// carries the same server-side capabilities the built-in OpenAI entry has.
+pub fn is_first_party_provider_id(provider_id: &str) -> bool {
+    provider_id == OPENAI_PROVIDER_ID || provider_id == ZAINO_PROVIDER_ID
+}
 pub const AMAZON_BEDROCK_GPT_5_5_MODEL_ID: &str = "openai.gpt-5.5";
 pub const AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID: &str = "openai.gpt-5.6-sol";
 pub const AMAZON_BEDROCK_GPT_6_1_SOL_MODEL_ID: &str = "openai.gpt-6.1-sol";
@@ -741,7 +749,7 @@ other non-default provider fields are not supported"
     pub fn supports_cyber_access_programs(&self, provider_id: &str) -> bool {
         self.capabilities
             .and_then(|capabilities| capabilities.cyber_access_programs)
-            .unwrap_or(provider_id == OPENAI_PROVIDER_ID)
+            .unwrap_or(is_first_party_provider_id(provider_id))
     }
 
     /// Whether this provider is served by Zaino itself rather than a
