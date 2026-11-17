@@ -160,6 +160,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Reads inline typed-array storage, which only the Bazel-built V8 pair provides; published 152.2.0 reports a zero inline size"]
     fn reads_typed_array_contents_with_the_compiled_binding_size() {
         initialize_v8();
         let isolate = &mut v8::Isolate::new(Default::default());
