@@ -558,15 +558,18 @@ jobs:
         else
           # `releases/latest` is 404 until the first stable release is published,
           # so a first release must not be misread as unreadable metadata. Tell
-          # the two apart by listing releases: if any release exists the lookup
-          # should have worked, so fail closed instead of guessing.
+          # the two apart by counting published releases: if any exists the
+          # lookup should have worked, so fail closed instead of guessing.
+          # Drafts are excluded because a re-run creates one for its own tag,
+          # and counting it would block the retry that is meant to publish it.
           if latest_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" 2>/dev/null)"; then
             make_latest="$(printf '%s' "${latest_json}" |
               python3 .github/scripts/releases.py "$version" --check-github latest)"
           else
-            release_count="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --jq 'length')"
-            if [[ "${release_count}" != "0" ]]; then
-              echo "Cannot read releases/latest although ${release_count} release(s) exist" >&2
+            published_count="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
+              --jq 'map(select(.draft == false)) | length')"
+            if [[ "${published_count}" != "0" ]]; then
+              echo "Cannot read releases/latest although ${published_count} published release(s) exist" >&2
               exit 1
             fi
             echo "No published releases yet; ${version} becomes latest"
