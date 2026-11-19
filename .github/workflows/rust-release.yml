@@ -453,7 +453,7 @@ jobs:
       with:
         persist-credentials: false
     - name: Download target artifacts
-      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
       with:
         path: dist
         # macOS package archives come from `package-macos`, which uploads them
@@ -539,13 +539,13 @@ jobs:
         \ sys; print(sys.stdin.read()[:124998])' > \"${notes_path}\"\n\necho \"path=${notes_path}\"\
         \ >> \"${GITHUB_OUTPUT}\"\n"
     - name: Download release artifacts
-      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
       with:
         path: dist
         pattern: '{{aarch64,x86_64}-{apple-darwin{,-app-server},unknown-linux-musl{,-app-server},pc-windows-msvc},*-symbols,argument-comment-lint-*,python-runtime-wheel-*,npm-packages}'
     - name: Download verified provisioned macOS packages
       if: vars.CODEX_PROVISIONED_MACOS_CANDIDATE == 'true'
-      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
       with:
         path: dist
         pattern: provisioned-macos-verified-candidate-*
@@ -803,13 +803,13 @@ jobs:
       with:
         persist-credentials: false
     - name: Download unsigned macOS binaries
-      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
       with:
         name: ${{ matrix.artifact_name }}-unsigned${{ env.ARTIFACT_SUFFIX }}
         path: ${{ runner.temp }}/unsigned-macos
     - name: Download unsigned voice runtime
       if: 'false'
-      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
       with:
         name: voice-${{ matrix.target }}-unsigned
         path: ${{ runner.temp }}/unsigned-voice
@@ -1028,18 +1028,18 @@ jobs:
       with:
         persist-credentials: false
     - name: Download signed macOS binaries
-      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
       with:
         name: ${{ matrix.artifact_name }}-signed-binaries${{ env.ARTIFACT_SUFFIX }}
         path: codex-rs/target/${{ matrix.target }}/release
     - name: Download signed macOS helpers
-      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
       with:
         name: ${{ matrix.target }}-signed-resources${{ env.ARTIFACT_SUFFIX }}
         path: codex-rs/signed-resources/${{ matrix.target }}
     - name: Download signed voice runtime
       if: 'false'
-      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
       with:
         name: voice-${{ matrix.target }}-signed${{ env.ARTIFACT_SUFFIX }}
         path: ${{ runner.temp }}/signed-voice
