@@ -432,18 +432,11 @@ jobs:
     needs:
     - build
     - package-macos
-    - build-windows
     # Deliberately not gated on package-macos succeeding: the macOS signing and
     # packaging chain is optional infrastructure. If it fails, the darwin
     # platform packages are skipped and the wrapper advertises only the
     # platforms that did build, rather than blocking every npm consumer.
-    if: >-
-      ${{
-        !cancelled() &&
-        needs.build.result == 'success' &&
-        (needs.build-windows.result == 'success' ||
-         needs.build-windows.result == 'skipped')
-      }}
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -482,23 +475,6 @@ jobs:
         name: npm-packages
         path: dist/npm/*.tgz
         if-no-files-found: error
-  build-windows:
-    name: Build Windows binaries
-    needs:
-    - tag-check
-    # Only when Azure Trusted Signing is configured. The Windows pipeline signs
-    # every artifact it produces and refuses to emit unsigned packages, so with
-    # no signing credentials it would fail the whole release. Skipping keeps the
-    # rest of the release (and the npm platforms that do build) shippable; the
-    # wrapper advertises only what exists.
-    #
-    # The gate is a repository variable, not a secret: `if:` expressions cannot
-    # read `secrets`, and doing so makes the whole workflow invalid. Set
-    # ZAINO_WINDOWS_SIGNING=true (plus the AZURE_ARTIFACT_SIGNING_* secrets)
-    # and this job starts contributing win32 packages automatically.
-    if: ${{ vars.ZAINO_WINDOWS_SIGNING == 'true' }}
-    uses: ./.github/workflows/rust-release-windows.yml
-    secrets: inherit
   release:
     concurrency:
       group: rust-release
@@ -506,7 +482,6 @@ jobs:
     needs:
     - tag-check
     - build
-    - build-windows
     - stage-npm-packages
     if: ${{ always() && needs.tag-check.result == 'success' && needs.build.result
       == 'success' && needs.stage-npm-packages.result == 'success' }}
