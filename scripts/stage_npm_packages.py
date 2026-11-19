@@ -254,7 +254,12 @@ def select_target_artifacts(
     selected_artifacts: list[WorkflowArtifact] = []
     missing_targets: list[str] = []
     for target in BINARY_TARGETS:
-        for artifact_name in [target, f"{target}-unsigned"]:
+        for artifact_name in (
+            target,
+            f"{target}-packaged",
+            f"{target}-packaged-bazel",
+            f"{target}-unsigned",
+        ):
             artifact = artifacts_by_name.get(artifact_name)
             if artifact is not None:
                 selected_artifacts.append(artifact)
@@ -489,7 +494,14 @@ def archive_name_for_target(artifact_prefix: str, target: str) -> str:
 
 
 def artifact_dir_for_target(artifacts_dir: Path, target: str) -> Path:
-    for artifact_name in [target, f"{target}-unsigned"]:
+    # macOS package archives are produced by `package-macos`, which uploads them
+    # under a `-packaged` suffix; Linux and Windows upload the bare target name.
+    for artifact_name in (
+        target,
+        f"{target}-packaged",
+        f"{target}-packaged-bazel",
+        f"{target}-unsigned",
+    ):
         artifact_dir = artifacts_dir / artifact_name
         if artifact_dir.is_dir():
             return artifact_dir
@@ -570,7 +582,12 @@ def main() -> int:
                 artifact_dir_for_target(artifacts_temp_root, target)
                 for target in BINARY_TARGETS
             ]
-            if args.artifacts_dir is not None and all(
+            # A release builds only some targets (the Windows matrix and the
+            # macOS packaging chain are separate jobs), so requiring every
+            # target to be present would drop out of the local path on every
+            # run and then fail to resolve a workflow for the tag. Any
+            # downloaded artifacts mean the caller already staged them.
+            if args.artifacts_dir is not None and any(
                 artifact_dir.is_dir() and any(artifact_dir.iterdir())
                 for artifact_dir in target_artifact_dirs
             ):
@@ -603,6 +620,21 @@ def main() -> int:
 
         if resolved_head_sha:
             print(f"should `git checkout {resolved_head_sha}`", flush=True)
+
+        # Decide which platform packages this release can actually publish, so
+        # the wrapper only advertises those. Compute the set before staging so
+        # the wrapper (staged alongside them) sees the final list.
+        publishable_platforms: list[str] = []
+        for package in packages:
+            platform = _BUILD_MODULE.ZAINO_PLATFORM_PACKAGES.get(package)
+            if platform is None:
+                continue
+            triple = platform["target_triple"]
+            vendor_src = vendor_src_by_components.get(
+                native_components_for_package(package)
+            )
+            if vendor_src is not None and (vendor_src / triple).is_dir():
+                publishable_platforms.append(platform["npm_name"])
 
         for package in packages:
             # Skip a platform package whose target was never built: there is no
@@ -639,6 +671,9 @@ def main() -> int:
                 "--pack-output",
                 str(pack_output),
             ]
+
+            if package == "zaino":
+                cmd.extend(["--platform-packages", *publishable_platforms])
 
             vendor_src = vendor_src_by_components.get(
                 native_components_for_package(package)

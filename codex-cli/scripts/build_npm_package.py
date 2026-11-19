@@ -131,6 +131,16 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="Directory containing pre-installed native binaries to bundle (vendor root).",
     )
+    parser.add_argument(
+        "--platform-packages",
+        nargs="*",
+        default=None,
+        metavar="PACKAGE",
+        help=(
+            "For the zaino wrapper: the platform packages this release publishes. "
+            "Only these are written as optionalDependencies. Omit to advertise all."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -153,7 +163,7 @@ def main() -> int:
     staging_dir, created_temp = prepare_staging_dir(args.staging_dir)
 
     try:
-        stage_sources(staging_dir, version, package)
+        stage_sources(staging_dir, version, package, args.platform_packages)
 
         vendor_src = args.vendor_src.resolve() if args.vendor_src else None
         native_components = PACKAGE_NATIVE_COMPONENTS.get(package, [])
@@ -229,7 +239,12 @@ def prepare_staging_dir(staging_dir: Path | None) -> tuple[Path, bool]:
     return temp_dir, True
 
 
-def stage_sources(staging_dir: Path, version: str, package: str) -> None:
+def stage_sources(
+    staging_dir: Path,
+    version: str,
+    package: str,
+    platform_packages: list[str] | None = None,
+) -> None:
     package_json: dict
     package_json_path: Path | None = None
 
@@ -298,14 +313,40 @@ def stage_sources(staging_dir: Path, version: str, package: str) -> None:
 
     if package == "zaino":
         package_json["files"] = ["bin/zaino.js"]
-        package_json["optionalDependencies"] = {
+        # Advertise only platforms whose package the release actually staged.
+        # An alias to a version that was never published installs "successfully"
+        # and then fails at startup with "Missing optional dependency", which is
+        # exactly how 1.0.0 shipped a wrapper that could not launch.
+        staged_platforms = staged_platform_packages(platform_packages)
+        optional_dependencies = {
             ZAINO_PLATFORM_PACKAGES[platform_package]["npm_name"]: (
                 f"npm:{ZAINO_NPM_NAME}@"
                 f"{compute_platform_package_version(version, ZAINO_PLATFORM_PACKAGES[platform_package]['npm_tag'])}"
             )
             for platform_package in PACKAGE_EXPANSIONS["zaino"]
             if platform_package != "zaino"
+            and ZAINO_PLATFORM_PACKAGES[platform_package]["npm_name"]
+            in staged_platforms
         }
+        package_json["optionalDependencies"] = optional_dependencies
+        if not optional_dependencies:
+            raise RuntimeError(
+                "Refusing to stage the zaino wrapper with no platform packages: "
+                "every install would fail at startup. Expected at least one of "
+                f"{', '.join(sorted(staged_platforms)) or 'the platform packages'}."
+            )
+        declared = set(optional_dependencies)
+        omitted = sorted(
+            ZAINO_PLATFORM_PACKAGES[p]["npm_name"]
+            for p in PACKAGE_EXPANSIONS["zaino"]
+            if p != "zaino"
+            and ZAINO_PLATFORM_PACKAGES[p]["npm_name"] not in declared
+        )
+        if omitted:
+            print(
+                "Not advertising unpublished platforms: " + ", ".join(omitted),
+                flush=True,
+            )
 
     elif package == "codex-sdk":
         scripts = package_json.get("scripts")
@@ -327,6 +368,18 @@ def compute_platform_package_version(version: str, platform_tag: str) -> str:
     # npm forbids republishing the same package name/version, so each
     # platform-specific tarball needs a unique version string.
     return f"{version}-{platform_tag}"
+
+
+def staged_platform_packages(explicit: list[str] | None) -> set[str]:
+    """Platform npm package names the release will actually publish."""
+    if explicit is not None:
+        return set(explicit)
+    # No constraint supplied (a local single-package build): advertise all.
+    return {
+        ZAINO_PLATFORM_PACKAGES[platform_package]["npm_name"]
+        for platform_package in PACKAGE_EXPANSIONS["zaino"]
+        if platform_package != "zaino"
+    }
 
 
 def run_command(cmd: list[str], cwd: Path | None = None) -> None:

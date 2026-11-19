@@ -178,7 +178,7 @@ resolver = "2"
 # 0.0.0 is treated as a source build by the update check and makes the release
 # workflow refuse to tag; the CLI's first public line is its own, not the
 # desktop app's 1.1.x.
-version = "1.0.0"
+version = "1.0.1"
 # Track the edition for all workspace crates in one place. Individual
 # crates can still override this value, but keeping it here means new
 # crates created with `cargo new -w ...` automatically inherit the 2024
