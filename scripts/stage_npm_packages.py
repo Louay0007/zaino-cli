@@ -419,7 +419,29 @@ def install_binary_components(
     selected_components: Sequence[BinaryComponent],
 ) -> None:
     for component in selected_components:
-        component_targets = list(BINARY_TARGETS)
+        # Only install for targets this release actually downloaded. A release
+        # does not build every target (Windows is a separate, signing-gated
+        # workflow that is skipped when it has no credentials), and demanding an
+        # archive for one that was never built aborts the whole publish.
+        component_targets = [
+            target
+            for target in BINARY_TARGETS
+            if find_binary_archive_path(
+                artifact_dir_for_target(artifacts_dir, target),
+                component.artifact_prefix,
+                target,
+            )
+            is not None
+        ]
+        skipped_targets = [t for t in BINARY_TARGETS if t not in component_targets]
+        if skipped_targets:
+            print(
+                f"No {component.binary_basename} archive for: "
+                + ", ".join(skipped_targets),
+                flush=True,
+            )
+        if not component_targets:
+            continue
 
         print(
             f"Installing {component.binary_basename} binaries for targets: "
@@ -470,7 +492,10 @@ def install_single_binary(
     return dest
 
 
-def binary_archive_path(artifact_dir: Path, artifact_prefix: str, target: str) -> Path:
+def find_binary_archive_path(
+    artifact_dir: Path, artifact_prefix: str, target: str
+) -> Path | None:
+    """Like binary_archive_path, but None instead of raising when absent."""
     archive_names = [archive_name_for_target(artifact_prefix, target)]
     if artifact_dir.name == f"{target}-unsigned":
         archive_names.append(
@@ -482,8 +507,17 @@ def binary_archive_path(artifact_dir: Path, artifact_prefix: str, target: str) -
         if archive_path.exists():
             return archive_path
 
+    return None
+
+
+def binary_archive_path(artifact_dir: Path, artifact_prefix: str, target: str) -> Path:
+    archive_path = find_binary_archive_path(artifact_dir, artifact_prefix, target)
+    if archive_path is not None:
+        return archive_path
+
     raise FileNotFoundError(
-        f"Expected artifact not found: {artifact_dir / archive_names[0]}"
+        f"Expected artifact not found: "
+        f"{artifact_dir / archive_name_for_target(artifact_prefix, target)}"
     )
 
 
