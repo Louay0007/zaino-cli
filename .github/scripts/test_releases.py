@@ -444,5 +444,87 @@ class StablePublicationTests(unittest.TestCase):
             )
 
 
+class ReleaseNameStepTests(unittest.TestCase):
+    """The `Define release name` step must survive a re-run's own draft."""
+
+    def run_step(self, gh_script: str, ref_name: str = "rust-v1.0.1"):
+        bash = shutil.which("bash")
+        if bash is None:
+            self.skipTest("Release workflow requires Bash")
+        workflow = Path(__file__).resolve().parent.parent / "workflows/rust-release.yml"
+        # Extract the literal `run: |` block for the release-name step.
+        lines = workflow.read_text().splitlines()
+        start = None
+        for index, line in enumerate(lines):
+            if line.strip() == "- name: Define release name":
+                start = index
+                break
+        self.assertIsNotNone(start, "Define release name step not found")
+        for index in range(start, len(lines)):
+            if lines[index].strip() == "run: |":
+                start = index + 1
+                break
+        end = start
+        while end < len(lines) and (
+            lines[end].startswith("        ") or not lines[end].strip()
+        ):
+            end += 1
+        script = "\n".join(line[8:] for line in lines[start:end])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            gh = root / "gh"
+            gh.write_text(gh_script)
+            gh.chmod(0o755)
+            output = root / "output"
+            result = subprocess.run(
+                [bash, "-c", script],
+                cwd=tmpdir,
+                env={
+                    **os.environ,
+                    "PATH": f"{root}{os.pathsep}{os.environ['PATH']}",
+                    "GITHUB_OUTPUT": str(output),
+                    "GITHUB_REF_NAME": ref_name,
+                    "GITHUB_REPOSITORY": "test/repo",
+                },
+                capture_output=True,
+                text=True,
+            )
+            values = dict(
+                line.split("=", 1)
+                for line in output.read_text().splitlines()
+                if "=" in line
+            )
+            return result, values
+
+    def test_own_draft_release_does_not_block_a_rerun(self):
+        # A failed publication leaves a draft for the tag it was publishing.
+        # `releases/latest` is 404 for a draft, and counting it would abort the
+        # retry that exists to publish it. The stub is faithful: the plain
+        # `length` of the release list is 1 (the draft), while the count that
+        # excludes drafts is 0.
+        result, values = self.run_step(
+            textwrap.dedent("""\
+                #!/usr/bin/env bash
+                if [[ "$*" == *releases/latest* ]]; then exit 1; fi
+                if [[ "$*" == *"select(.draft == false)"* ]]; then echo 0; exit 0; fi
+                echo 1
+                """)
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(values["make_latest"], "true")
+
+    def test_unreadable_latest_alongside_a_published_release_still_fails(self):
+        result, _ = self.run_step(
+            textwrap.dedent("""\
+                #!/usr/bin/env bash
+                if [[ "$*" == *releases/latest* ]]; then exit 1; fi
+                if [[ "$*" == *"select(.draft == false)"* ]]; then echo 1; exit 0; fi
+                echo 2
+                """)
+        )
+        self.assertNotEqual(result.returncode, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
