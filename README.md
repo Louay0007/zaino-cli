@@ -47,7 +47,7 @@ No config file is needed: the CLI defaults to the `zaino` provider, which speaks
 
 ### Models
 
-Four aliases, chosen with/model picker or `--model`:
+Four aliases, chosen with the `/model` picker or `--model`:
 
 | Alias | Use |
 | --- | --- |

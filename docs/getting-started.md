@@ -8,7 +8,15 @@ cd your-project
 /path/to/zaino-cli/codex-rs/target/release/zaino
 ```
 
-The npm package (`@zaino/cli`) is not published yet; build from source until it is.
+The npm package is published as `zainocli` — `zaino` is a reserved name on npm.
+
+```shell
+npm install -g zainocli
+```
+
+The platform binary arrives as an optional dependency (`zainocli-darwin-arm64`,
+`zainocli-linux-x64`, …), so the install only downloads the one for your machine. If your
+platform has no published binary yet, build from source with the commands above.
 
 Interactive mode opens a prompt where you can describe a task; Zaino reads and edits files in
 the current directory, runs commands in a sandbox and asks before anything destructive.
