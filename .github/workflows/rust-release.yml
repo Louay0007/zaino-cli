@@ -546,14 +546,35 @@ jobs:
       id: release_name
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: "set -euo pipefail\n# Extract the version from the tag name, which is in\
-        \ the format\n# \"rust-v0.1.0\".\nversion=\"${GITHUB_REF_NAME#rust-v}\"\n\
-        echo \"name=${version}\" >> $GITHUB_OUTPUT\nif [[ \"${version}\" == *-* ]];\
-        \ then\n  echo \"make_latest=false\" >> $GITHUB_OUTPUT\n  echo \"prerelease=true\"\
-        \ >> $GITHUB_OUTPUT\nelse\n  make_latest=\"$(gh api \"repos/${GITHUB_REPOSITORY}/releases/latest\"\
-        \ \\\n    | python3 .github/scripts/releases.py \"$version\" --check-github\
-        \ latest)\"\n  echo \"make_latest=${make_latest}\" >> $GITHUB_OUTPUT\n  echo\
-        \ \"prerelease=false\" >> $GITHUB_OUTPUT\nfi\n"
+      run: |
+        set -euo pipefail
+        # Extract the version from the tag name, which is in the format
+        # "rust-v0.1.0".
+        version="${GITHUB_REF_NAME#rust-v}"
+        echo "name=${version}" >> "$GITHUB_OUTPUT"
+        if [[ "${version}" == *-* ]]; then
+          echo "make_latest=false" >> "$GITHUB_OUTPUT"
+          echo "prerelease=true" >> "$GITHUB_OUTPUT"
+        else
+          # `releases/latest` is 404 until the first stable release is published,
+          # so a first release must not be misread as unreadable metadata. Tell
+          # the two apart by listing releases: if any release exists the lookup
+          # should have worked, so fail closed instead of guessing.
+          if latest_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" 2>/dev/null)"; then
+            make_latest="$(printf '%s' "${latest_json}" |
+              python3 .github/scripts/releases.py "$version" --check-github latest)"
+          else
+            release_count="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --jq 'length')"
+            if [[ "${release_count}" != "0" ]]; then
+              echo "Cannot read releases/latest although ${release_count} release(s) exist" >&2
+              exit 1
+            fi
+            echo "No published releases yet; ${version} becomes latest"
+            make_latest=true
+          fi
+          echo "make_latest=${make_latest}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=false" >> "$GITHUB_OUTPUT"
+        fi
     - name: Determine npm publish settings
       id: npm_publish_settings
       env:
@@ -600,13 +621,36 @@ jobs:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         RELEASE_TAG: ${{ needs.release.outputs.tag }}
         RELEASE_VERSION: ${{ needs.release.outputs.version }}
-      run: "set -euo pipefail\nversion=\"$RELEASE_VERSION\"\ntag=\"$RELEASE_TAG\"\n\
-        mkdir -p dist/npm\npatterns=(\n  \"zaino-npm-${version}.tgz\"\n  \"zaino-npm-linux-*-${version}.tgz\"\
-        \n  \"zaino-npm-darwin-*-${version}.tgz\"\n  \"zaino-npm-win32-*-${version}.tgz\"\
-        \n  \"codex-responses-api-proxy-npm-${version}.tgz\"\n  \"codex-sdk-npm-${version}.tgz\"\
-        \n)\nfor pattern in \"${patterns[@]}\"; do\n  gh release download \"$tag\"\
-        \ \\\n    --repo \"${GITHUB_REPOSITORY}\" \\\n    --pattern \"$pattern\" \\\
-        \n    --dir dist/npm\ndone\n"
+      run: |
+        set -euo pipefail
+        version="$RELEASE_VERSION"
+        tag="$RELEASE_TAG"
+        mkdir -p dist/npm
+        patterns=(
+          "zaino-npm-${version}.tgz"
+          "zaino-npm-linux-*-${version}.tgz"
+          "zaino-npm-darwin-*-${version}.tgz"
+          "zaino-npm-win32-*-${version}.tgz"
+          "codex-responses-api-proxy-npm-${version}.tgz"
+          "codex-sdk-npm-${version}.tgz"
+        )
+        # A pattern with no matching asset makes `gh release download` exit
+        # non-zero, and a platform that was not built has no tarball. That is
+        # expected, not fatal: the wrapper only advertises platforms that were
+        # staged, so an absent tarball has no optionalDependency pointing at it.
+        for pattern in "${patterns[@]}"; do
+          if ! gh release download "$tag" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern "$pattern" \
+            --dir dist/npm; then
+            echo "::warning title=No release asset::No release asset matches ${pattern}; skipping it"
+          fi
+        done
+        if ! compgen -G "dist/npm/*.tgz" > /dev/null; then
+          echo "No npm tarballs could be downloaded from ${tag}"
+          exit 1
+        fi
+        ls -l dist/npm
     - name: Publish to npm
       env:
         VERSION: ${{ needs.release.outputs.version }}
@@ -659,9 +703,12 @@ jobs:
         \      ;;\n  esac\n\n  # The publication workflow holds the lock from this\
         \ lookup through\n  # publish, including concurrent releases from other version\
         \ lines.\n  tag=\"$(python3 .github/scripts/npm_alpha_tag.py \"${tarball}\"\
-        \ \"${VERSION}\" \"${tag:-latest}\")\"\n\n  publish_cmd=(npm publish \"${GITHUB_WORKSPACE}/${tarball}\"\
-        )\n  if [[ -n \"${tag}\" ]]; then\n    publish_cmd+=(--tag \"${tag}\")\n \
-        \ fi\n\n  # A fresh npm process re-reads the token on each attempt.\n  for\
+        \ \"${VERSION}\" \"${tag:-latest}\")\"\n\n  # A scoped package's first publish defaults to restricted access, which needs\
+        \ a paid\n  # plan and otherwise fails with E403. Declare public access explicitly\
+        \ so\n  # @zaino/* publishes on the first release. Harmless for unscoped names\
+        \ and for\n  # packages already published.\n  publish_cmd=(npm publish \"${GITHUB_WORKSPACE}/${tarball}\"\
+        \ --access public)\n  if [[ -n \"${tag}\" ]]; then\n    publish_cmd+=(--tag\
+        \ \"${tag}\")\n  fi\n\n  # A fresh npm process re-reads the token on each attempt.\n  for\
         \ attempt in 1 2 3; do\n    echo \"+ ${publish_cmd[*]} (attempt ${attempt}/3)\"\
         \n    set +e\n    publish_output=\"$(\"${publish_cmd[@]}\" 2>&1)\"\n    publish_status=$?\n\
         \    set -e\n\n    echo \"${publish_output}\"\n    if [[ ${publish_status}\

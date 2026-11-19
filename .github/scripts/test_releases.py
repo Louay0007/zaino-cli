@@ -156,7 +156,7 @@ class NpmAlphaTagTest(unittest.TestCase):
                             "--json",
                             "--prefer-online",
                         ],
-                        check=True,
+                        check=False,
                         capture_output=True,
                         text=True,
                     )
@@ -187,6 +187,38 @@ class NpmAlphaTagTest(unittest.TestCase):
             ):
                 with self.assertRaises(subprocess.CalledProcessError):
                     npm_alpha_tag(tarball, "0.158.0-alpha.10", "alpha")
+
+    def test_unpublished_package_is_treated_as_untagged(self) -> None:
+        # The platform packages, the SDK, and the proxy are each published for
+        # the first time by some release. `npm view` exits 1 with E404 for a
+        # name the registry has never seen; that must not abort the publish.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tarball = Path(tmpdir) / "package.tgz"
+            self.write_package(tarball, "zainocli-darwin-arm64")
+            not_found = subprocess.CompletedProcess(
+                [],
+                1,
+                json.dumps({"error": {"code": "E404", "summary": "Not Found"}}),
+                "npm error code E404\nnpm error 404 Not Found\n",
+            )
+            with patch("npm_alpha_tag.subprocess.run", return_value=not_found):
+                self.assertEqual(npm_alpha_tag(tarball, "1.0.1", "latest"), "latest")
+                self.assertEqual(
+                    npm_alpha_tag(tarball, "1.0.1", "darwin-arm64"), "darwin-arm64"
+                )
+
+    def test_missing_package_does_not_hide_a_registry_failure(self) -> None:
+        # A non-404 failure still aborts: writing a tag over an unreadable
+        # pointer for a name that does exist could move latest backwards.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tarball = Path(tmpdir) / "package.tgz"
+            self.write_package(tarball, "@zaino/cli")
+            unauthorized = subprocess.CompletedProcess(
+                [], 1, "", "npm error code E401\nnpm error 401 Unauthorized\n"
+            )
+            with patch("npm_alpha_tag.subprocess.run", return_value=unauthorized):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    npm_alpha_tag(tarball, "1.0.1", "latest")
 
 
 class DotSlashReleaseConfigTests(unittest.TestCase):

@@ -9,6 +9,31 @@ import tarfile
 from releases import is_valid_stable_release_version, should_update_version
 
 
+def _dist_tags(package: str) -> dict[str, str]:
+    """Read dist-tags, treating a package absent from the registry as untagged.
+
+    Every platform package, the SDK, and the proxy are published for the first
+    time by some release. `npm view` exits non-zero with E404 for a name the
+    registry has never seen, which is an empty tag set, not a failure. Any other
+    error still aborts so a broken registry never publishes over a live pointer.
+    """
+    result = subprocess.run(
+        ["npm", "view", package, "dist-tags", "--json", "--prefer-online"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        output = f"{result.stdout or ''}{result.stderr or ''}"
+        if "E404" not in output and "Not found" not in output:
+            raise subprocess.CalledProcessError(
+                result.returncode, "npm view", result.stdout, result.stderr
+            )
+        print(f"Package {package} is not published yet", file=sys.stderr)
+        return {}
+    return json.loads(result.stdout)
+
+
 def npm_alpha_tag(tarball: Path, version: str, tag: str) -> str:
     # Read the actual package name: platform archives share @zaino/cli,
     # while the SDK and proxy have independent latest/alpha pointers.
@@ -16,13 +41,7 @@ def npm_alpha_tag(tarball: Path, version: str, tag: str) -> str:
         with archive.extractfile("package/package.json") as manifest:
             package = json.load(manifest)["name"]
 
-    result = subprocess.run(
-        ["npm", "view", package, "dist-tags", "--json", "--prefer-online"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    current = json.loads(result.stdout).get(tag, "")
+    current = _dist_tags(package).get(tag, "")
     if tag not in ("alpha", "latest"):
         # build_npm_package.py appends -<platform> to the release version.
         current = current.removesuffix(f"-{tag.removeprefix('alpha-')}")
