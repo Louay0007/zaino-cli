@@ -941,15 +941,45 @@ jobs:
     - name: Stage unsigned macOS binaries as the signed artifact
       if: ${{ vars.ZAINO_MACOS_SIGNING != 'true' }}
       shell: bash
-      run: "set -euo pipefail\ndest=\"signed-macos/${TARGET}\"\nmkdir -p \"$dest\"\
-        \n# The build job uploads its binaries as an archive; this job downloads and\n\
-        # extracts them under $RUNNER_TEMP, so stage from there. Without signing there\n\
-        # is nothing else to copy.\nsrc=\"${RUNNER_TEMP}/unsigned-macos\"\nfind \"\
-        $src\" -maxdepth 3 -type f | head -20\nfor binary in ${BINARIES}; do\n  found=\"\
-        $(find \"$src\" -type f -name \"${binary}*\" | head -1)\"\n  if [[ -n \"${found}\"\
-        \ ]]; then\n    cp \"$found\" \"${dest}/${binary}\"\n    chmod 0755 \"${dest}/${binary}\"\
-        \n  else\n    echo \"missing ${binary} under ${src}\" >&2\n  fi\ndone\nls\
-        \ -la \"$dest\"\n"
+      run: |
+        set -euo pipefail
+        dest="signed-macos/${TARGET}"
+        mkdir -p "$dest"
+        # The build job uploads each binary as `-unsigned.zst` next to a
+        # `-unsigned.tar.gz`. This job downloads and extracts them under
+        # $RUNNER_TEMP, so stage from there; without signing there is nothing
+        # else to copy.
+        src="${RUNNER_TEMP}/unsigned-macos"
+        find "$src" -maxdepth 3 -type f | head -20
+        for binary in ${BINARIES}; do
+          # Match the exact staged name, never a prefix. A `-name "${binary}*"`
+          # glob also matches `<binary>-<target>-unsigned.zst`, whose contents
+          # are zstd-compressed rather than executable; picking it shipped a
+          # compressed blob as the binary and every macOS install failed with
+          # ENOEXEC.
+          plain="$(find "$src" -type f -name "${binary}" | head -1)"
+          if [[ -n "${plain}" ]]; then
+            cp "$plain" "${dest}/${binary}"
+          else
+            archive="$(find "$src" -type f -name "${binary}-${TARGET}-unsigned.zst" | head -1)"
+            if [[ -z "${archive}" ]]; then
+              echo "missing ${binary} under ${src}" >&2
+              exit 1
+            fi
+            zstd -d --stdout "$archive" > "${dest}/${binary}"
+          fi
+          chmod 0755 "${dest}/${binary}"
+        done
+        # Fail rather than publish a package whose entrypoint is not executable.
+        for binary in ${BINARIES}; do
+          magic="$(od -An -tx1 -N4 "${dest}/${binary}" | tr -d ' \n')"
+          if [[ "${magic}" == "28b52ffd" ]]; then
+            echo "${dest}/${binary} is still zstd-compressed" >&2
+            exit 1
+          fi
+        done
+        ls -la "$dest"
+
       env:
         TARGET: ${{ matrix.target }}
         BINARIES: ${{ matrix.binaries }}
