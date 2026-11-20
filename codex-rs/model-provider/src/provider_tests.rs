@@ -230,6 +230,57 @@ fn configured_provider_uses_default_approval_review_model_with_chatgpt_auth() {
     );
 }
 
+/// The Zaino gateway rejects every upstream slug, so the catalog the provider
+/// builds must contain only its own aliases even though the shared
+/// `models.json` it is narrowed from carries sixteen upstream models.
+#[tokio::test]
+async fn zaino_provider_serves_only_gateway_aliases() {
+    let provider = create_model_provider(
+        ModelProviderInfo::create_zaino_provider(),
+        /*auth_manager*/ None,
+    );
+    let models_manager =
+        provider.models_manager(std::env::temp_dir(), /*config_model_catalog*/ None);
+
+    let slugs: Vec<String> = models_manager
+        .get_remote_models()
+        .await
+        .into_iter()
+        .map(|model| model.slug)
+        .collect();
+    assert_eq!(
+        slugs,
+        codex_models_manager::ZAINO_MODEL_SLUGS
+            .map(str::to_string)
+            .to_vec()
+    );
+    assert_eq!(
+        models_manager
+            .try_list_models()
+            .expect("static models should be available")
+            .into_iter()
+            .find(|model| model.is_default)
+            .map(|model| model.model),
+        Some("smart".to_string())
+    );
+}
+
+/// Review and memory run against the gateway too, so they must not ask for an
+/// upstream model ID.
+#[test]
+fn zaino_provider_uses_gateway_aliases_for_review_and_memory() {
+    let provider = create_model_provider(
+        ModelProviderInfo::create_zaino_provider(),
+        Some(AuthManager::from_auth_for_testing(CodexAuth::from_api_key(
+            "zn-test-key",
+        ))),
+    );
+
+    assert_eq!(provider.approval_review_preferred_model(), "fast");
+    assert_eq!(provider.memory_extraction_preferred_model(), "fast");
+    assert_eq!(provider.memory_consolidation_preferred_model(), "fast");
+}
+
 struct RotatingAuth(AtomicUsize);
 
 impl codex_login::ExternalAuth for RotatingAuth {

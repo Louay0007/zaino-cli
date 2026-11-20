@@ -18,6 +18,16 @@
   registry lookup used an encoded `@zaino%2fcli` URL that 404s, and every
   suggested command installed a package that does not exist; both now use
   `zainocli`.
+- Serve only the Zaino model aliases. The default provider now builds its
+  catalog from its own four aliases rather than the sixteen upstream models, so
+  the picker can no longer offer a model the gateway rejects with
+  `Unknown model`. The shared `models.json` is untouched, so Bedrock, Vertex and
+  the first-party provider keep the upstream catalog. `smart` remains the
+  default, and `debug models --bundled` reports the Zaino catalog instead of the
+  upstream one.
+- Point automatic approval review and memory extraction at the gateway aliases.
+  They asked for `codex-auto-review`, `gpt-6-luna` and `gpt-6.1-terra`, which the
+  gateway rejects; they now use `fast`.
 - Document the real npm publication path, replacing the instructions to create
   an npm org that cannot be created.
 

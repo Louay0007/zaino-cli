@@ -107,6 +107,15 @@ pub const DEFAULT_MEMORY_EXTRACTION_PREFERRED_MODEL: &str = "gpt-6-luna";
 /// a backend-specific model ID.
 pub const DEFAULT_MEMORY_CONSOLIDATION_PREFERRED_MODEL: &str = "gpt-6.1-terra";
 
+/// Model the Zaino gateway uses for automatic approval review.
+///
+/// The gateway serves only its own aliases, so the upstream review and memory
+/// model IDs above are rejected there.
+const ZAINO_REVIEW_PREFERRED_MODEL: &str = "fast";
+
+/// Model the Zaino gateway uses for memory extraction and consolidation.
+const ZAINO_MEMORY_PREFERRED_MODEL: &str = "fast";
+
 /// Runtime provider abstraction used by model execution.
 ///
 /// Implementations own provider-specific behavior for a model backend. The
@@ -553,7 +562,11 @@ impl ModelProvider for ConfiguredModelProvider {
     }
 
     fn approval_review_preferred_model(&self) -> &'static str {
-        if self
+        if self.info.is_zaino() {
+            // The gateway only serves the Zaino aliases, so an OpenAI review
+            // model ID would be rejected outright.
+            ZAINO_REVIEW_PREFERRED_MODEL
+        } else if self
             .auth_manager
             .as_ref()
             .and_then(|auth_manager| auth_manager.auth_cached())
@@ -562,6 +575,22 @@ impl ModelProvider for ConfiguredModelProvider {
             API_KEY_APPROVAL_REVIEW_PREFERRED_MODEL
         } else {
             DEFAULT_APPROVAL_REVIEW_PREFERRED_MODEL
+        }
+    }
+
+    fn memory_extraction_preferred_model(&self) -> &'static str {
+        if self.info.is_zaino() {
+            ZAINO_MEMORY_PREFERRED_MODEL
+        } else {
+            DEFAULT_MEMORY_EXTRACTION_PREFERRED_MODEL
+        }
+    }
+
+    fn memory_consolidation_preferred_model(&self) -> &'static str {
+        if self.info.is_zaino() {
+            ZAINO_MEMORY_PREFERRED_MODEL
+        } else {
+            DEFAULT_MEMORY_CONSOLIDATION_PREFERRED_MODEL
         }
     }
 
@@ -716,6 +745,17 @@ impl ModelProvider for ConfiguredModelProvider {
                 self.auth_manager.clone(),
                 model_catalog,
                 codex_models_manager::ModelOrigin::ExplicitConfig,
+            ));
+        }
+        // The Zaino gateway serves only its own aliases, so a remote or bundled
+        // catalog would advertise models that fail with "Unknown model". Ship
+        // the narrowed catalog instead of fetching one.
+        if self.info.is_zaino() {
+            let model_catalog = codex_models_manager::zaino_models_response().unwrap_or_default();
+            return Arc::new(StaticModelsManager::new(
+                self.auth_manager.clone(),
+                model_catalog,
+                codex_models_manager::ModelOrigin::Provider,
             ));
         }
         let endpoint = Arc::new(

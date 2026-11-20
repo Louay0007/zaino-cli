@@ -105,6 +105,7 @@ use codex_login::AuthManager;
 use codex_memories_write::clear_memory_roots_contents;
 use codex_models_manager::bundled_models_response;
 use codex_models_manager::manager::RefreshStrategy;
+use codex_models_manager::zaino_models_response;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::user_input::UserInput;
 use codex_terminal_detection::TerminalName;
@@ -2213,16 +2214,17 @@ async fn run_debug_models_command(
     cmd: DebugModelsCommand,
     root_config_overrides: CliConfigOverrides,
 ) -> anyhow::Result<()> {
-    let catalog = if cmd.bundled {
-        bundled_models_response()?
-    } else {
-        let cli_overrides = root_config_overrides
-            .parse_overrides()
-            .map_err(anyhow::Error::msg)?;
-        let config = ConfigBuilder::default()
-            .cli_overrides(cli_overrides)
-            .build()
-            .await?;
+    let cli_overrides = root_config_overrides
+        .parse_overrides()
+        .map_err(anyhow::Error::msg)?;
+    let config = ConfigBuilder::default()
+        .cli_overrides(cli_overrides)
+        .build()
+        .await?;
+    // Zaino ships a narrowed catalog of its own, and it is the default provider,
+    // so `--bundled` must show the aliases the gateway accepts rather than the
+    // upstream models it rejects.
+    let catalog = if !cmd.bundled {
         let auth_manager =
             AuthManager::shared_from_config(&config, /*enable_codex_api_key_env*/ true).await?;
         let runtime_auth = if config.model_catalog.is_none()
@@ -2246,6 +2248,10 @@ async fn run_debug_models_command(
                 config.http_client_factory(),
             )
             .await
+    } else if config.model_provider.is_zaino() {
+        zaino_models_response()?
+    } else {
+        bundled_models_response()?
     };
 
     serde_json::to_writer(std::io::stdout(), &catalog)?;
