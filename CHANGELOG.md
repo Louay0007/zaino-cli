@@ -17,6 +17,19 @@
 - npm publication no longer waits on the macOS signing and notarization chain.
   That chain is optional; when it fails, the darwin packages are skipped and the
   remaining platforms still publish.
+- Ship executable macOS binaries. Without signing credentials the staging step
+  matched its input with a `"${binary}*"` glob, which selected the
+  `<binary>-<target>-unsigned.zst` archive, so the darwin packages contained
+  zstd-compressed data instead of Mach-O executables and `zaino` failed with
+  `ENOEXEC`. The exact name is matched first, the archive is decompressed when
+  it is the only input, and a result that still carries the zstd magic number is
+  rejected before publication.
+- Publish each package on its first release. Adding Windows signing is not
+  needed for the four built platforms to appear: a missing tarball is skipped
+  with a warning instead of aborting the publish, an npm name that the registry
+  has never seen no longer fails the dist-tag lookup, the release runs when the
+  repository has no published release yet, and scoped packages publish with
+  explicit public access.
 
 ## 1.0.0 (2026-11-14)
 
