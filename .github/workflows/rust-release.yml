@@ -812,7 +812,16 @@ jobs:
           # package must not cost every platform its release.
           package_name="$(tar -xzOf "${tarball}" package/package.json |
             python3 -c 'import json,sys; print(json.load(sys.stdin)["name"])')"
-          if ! npm view "${package_name}" version > /dev/null 2>&1; then
+          # Ask the registry whether the name exists before publishing. Only a
+          # definitive 404 means "never published"; a network or auth failure
+          # must abort, or a transient error would silently skip a live package
+          # and report a successful release that is missing a platform.
+          if ! view_output="$(npm view "${package_name}" version 2>&1)"; then
+            if ! grep -q 'E404' <<< "${view_output}"; then
+              echo "::error title=Registry lookup failed::Cannot check ${package_name}"
+              echo "${view_output}" >&2
+              exit 1
+            fi
             echo "::warning title=Trusted publisher not configured::${package_name} is not on npm yet"
             echo "${package_name} has never been published, and npm only accepts a" >&2
             echo "trusted publisher for a package that already exists. Publish its" >&2
