@@ -12,7 +12,7 @@ jobs:
   tag-check:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         persist-credentials: false
     - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
@@ -91,7 +91,7 @@ jobs:
             bwrap
           build_dmg: 'false'
     steps:
-    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         persist-credentials: false
     - name: Print runner specs (Linux)
@@ -442,7 +442,7 @@ jobs:
       contents: read
     steps:
     - name: Checkout repository
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         persist-credentials: false
     - name: Download target artifacts
@@ -498,7 +498,7 @@ jobs:
       npm_tag: ${{ steps.npm_publish_settings.outputs.npm_tag }}
     steps:
     - name: Checkout repository
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         persist-credentials: false
     - name: Generate release notes from tag commit message
@@ -614,7 +614,7 @@ jobs:
       id-token: write
     steps:
     - name: Checkout repository
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         persist-credentials: false
     - name: Setup Node.js
@@ -916,7 +916,7 @@ jobs:
           runner: macos-15-intel
           prefix: macos_x86_64
     steps:
-    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         persist-credentials: false
     - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
@@ -987,7 +987,7 @@ jobs:
           artifact_name: x86_64-apple-darwin
           binaries: zaino codex-code-mode-host codex-exec-server codex-responses-api-proxy
     steps:
-    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         persist-credentials: false
     - name: Download unsigned macOS binaries
@@ -1242,7 +1242,7 @@ jobs:
           binaries: zaino codex-code-mode-host codex-exec-server codex-responses-api-proxy
           build_dmg: 'true'
     steps:
-    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         persist-credentials: false
     - name: Download signed macOS binaries
