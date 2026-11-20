@@ -609,6 +609,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # Trusted publishing: npm verifies this exact workflow through a
+      # short-lived OIDC token, so no NPM_TOKEN is stored or rotated.
+      id-token: write
     steps:
     - name: Checkout repository
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -619,6 +622,34 @@ jobs:
       with:
         node-version-file: .nvmrc
         registry-url: https://registry.npmjs.org
+        # Never cache in a publish job: a poisoned cache could expose the
+        # OIDC credential.
+        package-manager-cache: false
+    - name: Update npm CLI for trusted publishing
+      # Trusted publishing needs npm 11.5.1+; setting dist-tags over OIDC
+      # needs 11.21.0+. Pin the floor rather than trusting the bundled client.
+      run: |
+        set -euo pipefail
+        npm install -g 'npm@^11.21.0'
+        npm --version
+    - name: Drop the setup-node auth placeholder
+      # `registry-url` adds an `//registry.npmjs.org/:_authToken=` line to
+      # .npmrc. npm treats any configured token as an instruction to skip the
+      # OIDC exchange, so with the secret removed that line made every publish
+      # fail with EOTP. Trusted publishing needs .npmrc to carry no credential.
+      run: |
+        set -euo pipefail
+        npmrc="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+        for candidate in "$npmrc" .npmrc; do
+          if [[ -f "$candidate" ]] && grep -q '_authToken' "$candidate"; then
+            grep -v '_authToken' "$candidate" > "${candidate}.tmp" || true
+            mv "${candidate}.tmp" "$candidate"
+            echo "Removed token entries from ${candidate}"
+          fi
+        done
+        if npm config get //registry.npmjs.org/:_authToken 2>/dev/null | grep -qv undefined; then
+          echo "An npm auth token is still configured; trusted publishing would be skipped" >&2
+        fi
     - name: Download npm tarballs from release
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -657,71 +688,194 @@ jobs:
     - name: Publish to npm
       env:
         VERSION: ${{ needs.release.outputs.version }}
-        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # Deliberately no NODE_AUTH_TOKEN: a present token makes the npm CLI
+        # authenticate with it and skip the OIDC exchange, which is what failed
+        # with EOTP. Trusted publishing needs no credential in the environment.
         NPM_TAG: ${{ needs.release.outputs.npm_tag }}
         NPM_CONFIG_LOGLEVEL: verbose
         NPM_CONFIG_LOGS_DIR: ${{ runner.temp }}/npm-publish-logs
         NPM_CONFIG_LOGS_MAX: '100'
-      run: "set -euo pipefail\nprefix=\"\"\nif [[ -n \"${NPM_TAG}\" ]]; then\n  prefix=\"\
-        ${NPM_TAG}-\"\nfi\n\nroot_tarball=\"dist/npm/zaino-npm-${VERSION}.tgz\"\n\
-        sdk_tarball=\"dist/npm/codex-sdk-npm-${VERSION}.tgz\"\n# Keep this list in\
-        \ sync with ZAINO_PLATFORM_PACKAGES in\n# codex-cli/scripts/build_npm_package.py.\
-        \ The root wrapper advances\n# @zaino/cli@latest as soon as it publishes,\
-        \ so every platform\n# package it aliases must already exist in the registry\
-        \ first.\nplatform_tarballs=(\n  \"dist/npm/zaino-npm-linux-x64-${VERSION}.tgz\"\
-        \n  \"dist/npm/zaino-npm-linux-arm64-${VERSION}.tgz\"\n  \"dist/npm/zaino-npm-darwin-x64-${VERSION}.tgz\"\
-        \n  \"dist/npm/zaino-npm-darwin-arm64-${VERSION}.tgz\"\n  \"dist/npm/zaino-npm-win32-x64-${VERSION}.tgz\"\
-        \n  \"dist/npm/zaino-npm-win32-arm64-${VERSION}.tgz\"\n)\n\n# A platform the\
-        \ build did not produce has no tarball. That is not\n# fatal: its optionalDependency\
-        \ simply resolves to nothing and npm\n# installs the matching platform package\
-        \ on the platforms that exist.\n# The root tarball, however, must be present.\n\
-        if [[ ! -f \"${root_tarball}\" ]]; then\n  echo \"Missing root npm tarball:\
-        \ ${root_tarball}\"\n  exit 1\nfi\nfor platform_tarball in \"${platform_tarballs[@]}\"\
-        ; do\n  if [[ ! -f \"${platform_tarball}\" ]]; then\n    echo \"::warning\
-        \ title=Platform not built::${platform_tarball##*/} is absent; skipping that\
-        \ platform's publish\"\n  fi\ndone\n\nshopt -s nullglob\nother_tarballs=()\n\
-        for tarball in dist/npm/*-\"${VERSION}\".tgz; do\n  if [[ \"${tarball}\" ==\
-        \ \"${root_tarball}\" || \"${tarball}\" == \"${sdk_tarball}\" ]]; then\n \
-        \   continue\n  fi\n\n  is_platform_tarball=false\n  for platform_tarball\
-        \ in \"${platform_tarballs[@]}\"; do\n    if [[ \"${tarball}\" == \"${platform_tarball}\"\
-        \ ]]; then\n      is_platform_tarball=true\n      break\n    fi\n  done\n\
-        \  if [[ \"${is_platform_tarball}\" == true ]]; then\n    continue\n  fi\n\
-        \n  other_tarballs+=(\"${tarball}\")\ndone\n\n# npm returns HTTP 409 when\
-        \ concurrent publishes update the same\n# packument. Every platform tarball\
-        \ is a version of @zaino/cli,\n# so publish all tarballs serially.\n# Only\
-        \ publish tarballs that exist: a platform the build did not produce\n# has\
-        \ no package, and `npm publish` on a missing file aborts the run.\ntarballs=()\n\
-        for platform_tarball in \"${platform_tarballs[@]}\"; do\n  [[ -f \"${platform_tarball}\"\
-        \ ]] && tarballs+=(\"${platform_tarball}\")\ndone\ntarballs+=(\"${other_tarballs[@]}\"\
-        )\ntarballs+=(\"${root_tarball}\")\n# The SDK depends on this exact root package\
-        \ version.\nif [[ -f \"${sdk_tarball}\" ]]; then\n  tarballs+=(\"${sdk_tarball}\"\
-        )\nfi\n\nfor tarball in \"${tarballs[@]}\"; do\n  filename=\"$(basename \"\
-        ${tarball}\")\"\n  tag=\"\"\n\n  case \"${filename}\" in\n    zaino-npm-linux-*-\"\
-        ${VERSION}\".tgz|zaino-npm-darwin-*-\"${VERSION}\".tgz|zaino-npm-win32-*-\"\
-        ${VERSION}\".tgz)\n      platform=\"${filename#zaino-npm-}\"\n      platform=\"\
-        ${platform%-${VERSION}.tgz}\"\n      tag=\"${prefix}${platform}\"\n      ;;\n\
-        \    zaino-npm-\"${VERSION}\".tgz|codex-responses-api-proxy-npm-\"${VERSION}\"\
-        .tgz|codex-sdk-npm-\"${VERSION}\".tgz)\n      tag=\"${NPM_TAG}\"\n      ;;\n\
-        \    *)\n      echo \"Unexpected npm tarball: ${filename}\"\n      exit 1\n\
-        \      ;;\n  esac\n\n  # The publication workflow holds the lock from this\
-        \ lookup through\n  # publish, including concurrent releases from other version\
-        \ lines.\n  tag=\"$(python3 .github/scripts/npm_alpha_tag.py \"${tarball}\"\
-        \ \"${VERSION}\" \"${tag:-latest}\")\"\n\n  # A scoped package's first publish defaults to restricted access, which needs\
-        \ a paid\n  # plan and otherwise fails with E403. Declare public access explicitly\
-        \ so\n  # @zaino/* publishes on the first release. Harmless for unscoped names\
-        \ and for\n  # packages already published.\n  publish_cmd=(npm publish \"${GITHUB_WORKSPACE}/${tarball}\"\
-        \ --access public)\n  if [[ -n \"${tag}\" ]]; then\n    publish_cmd+=(--tag\
-        \ \"${tag}\")\n  fi\n\n  # A fresh npm process re-reads the token on each attempt.\n  for\
-        \ attempt in 1 2 3; do\n    echo \"+ ${publish_cmd[*]} (attempt ${attempt}/3)\"\
-        \n    set +e\n    publish_output=\"$(\"${publish_cmd[@]}\" 2>&1)\"\n    publish_status=$?\n\
-        \    set -e\n\n    echo \"${publish_output}\"\n    if [[ ${publish_status}\
-        \ -eq 0 ]]; then\n      break\n    fi\n\n    if grep -qiE \"previously published|cannot\
-        \ publish over|version already exists\" <<< \"${publish_output}\"; then\n\
-        \      echo \"Skipping already-published package version for ${filename}\"\
-        \n      break\n    fi\n\n    if [[ ${attempt} -eq 3 ]]; then\n      exit \"\
-        ${publish_status}\"\n    fi\n    delay=$((attempt * 10))\n    echo \"Publishing\
-        \ ${filename} failed; retrying in ${delay} seconds.\"\n    sleep \"${delay}\"\
-        \n  done\ndone\n"
+      run: |
+        set -euo pipefail
+        prefix=""
+        if [[ -n "${NPM_TAG}" ]]; then
+          prefix="${NPM_TAG}-"
+        fi
+
+        root_tarball="dist/npm/zaino-npm-${VERSION}.tgz"
+        sdk_tarball="dist/npm/codex-sdk-npm-${VERSION}.tgz"
+        # Keep this list in sync with ZAINO_PLATFORM_PACKAGES in
+        # codex-cli/scripts/build_npm_package.py. The root wrapper advances
+        # @zaino/cli@latest as soon as it publishes, so every platform
+        # package it aliases must already exist in the registry first.
+        platform_tarballs=(
+          "dist/npm/zaino-npm-linux-x64-${VERSION}.tgz"
+          "dist/npm/zaino-npm-linux-arm64-${VERSION}.tgz"
+          "dist/npm/zaino-npm-darwin-x64-${VERSION}.tgz"
+          "dist/npm/zaino-npm-darwin-arm64-${VERSION}.tgz"
+          "dist/npm/zaino-npm-win32-x64-${VERSION}.tgz"
+          "dist/npm/zaino-npm-win32-arm64-${VERSION}.tgz"
+        )
+
+        # A platform the build did not produce has no tarball. That is not
+        # fatal: its optionalDependency simply resolves to nothing and npm
+        # installs the matching platform package on the platforms that exist.
+        # The root tarball, however, must be present.
+        if [[ ! -f "${root_tarball}" ]]; then
+          echo "Missing root npm tarball: ${root_tarball}"
+          exit 1
+        fi
+        for platform_tarball in "${platform_tarballs[@]}"; do
+          if [[ ! -f "${platform_tarball}" ]]; then
+            echo "::warning title=Platform not built::${platform_tarball##*/} is absent; skipping that platform's publish"
+          fi
+        done
+
+        shopt -s nullglob
+        other_tarballs=()
+        for tarball in dist/npm/*-"${VERSION}".tgz; do
+          if [[ "${tarball}" == "${root_tarball}" || "${tarball}" == "${sdk_tarball}" ]]; then
+            continue
+          fi
+
+          is_platform_tarball=false
+          for platform_tarball in "${platform_tarballs[@]}"; do
+            if [[ "${tarball}" == "${platform_tarball}" ]]; then
+              is_platform_tarball=true
+              break
+            fi
+          done
+          if [[ "${is_platform_tarball}" == true ]]; then
+            continue
+          fi
+
+          other_tarballs+=("${tarball}")
+        done
+
+        # npm returns HTTP 409 when concurrent publishes update the same
+        # packument. Every platform tarball is a version of @zaino/cli,
+        # so publish all tarballs serially.
+        # Only publish tarballs that exist: a platform the build did not produce
+        # has no package, and `npm publish` on a missing file aborts the run.
+        tarballs=()
+        for platform_tarball in "${platform_tarballs[@]}"; do
+          [[ -f "${platform_tarball}" ]] && tarballs+=("${platform_tarball}")
+        done
+        tarballs+=("${other_tarballs[@]}")
+        tarballs+=("${root_tarball}")
+        # The SDK depends on this exact root package version.
+        if [[ -f "${sdk_tarball}" ]]; then
+          tarballs+=("${sdk_tarball}")
+        fi
+
+        # Read every manifest before publishing anything. A corrupt or truncated
+        # tarball would otherwise raise mid-loop, after some platforms were
+        # already published, leaving a release that can only be finished by hand.
+        for tarball in "${tarballs[@]}"; do
+          if ! tar -xzOf "${tarball}" package/package.json > /dev/null 2>&1; then
+            echo "::error title=Corrupt package::Cannot read package.json from ${tarball}"
+            exit 1
+          fi
+        done
+
+        # Names that have never been published. Accumulated across the loop, so
+        # it must be declared here, not inside it.
+        unregistered=()
+
+        for tarball in "${tarballs[@]}"; do
+          filename="$(basename "${tarball}")"
+          tag=""
+
+          case "${filename}" in
+            zaino-npm-linux-*-"${VERSION}".tgz|zaino-npm-darwin-*-"${VERSION}".tgz|zaino-npm-win32-*-"${VERSION}".tgz)
+              platform="${filename#zaino-npm-}"
+              platform="${platform%-${VERSION}.tgz}"
+              tag="${prefix}${platform}"
+              ;;
+            zaino-npm-"${VERSION}".tgz|codex-responses-api-proxy-npm-"${VERSION}".tgz|codex-sdk-npm-"${VERSION}".tgz)
+              tag="${NPM_TAG}"
+              ;;
+            *)
+              echo "Unexpected npm tarball: ${filename}"
+              exit 1
+              ;;
+          esac
+
+          # The publication workflow holds the lock from this lookup through
+          # publish, including concurrent releases from other version lines.
+          tag="$(python3 .github/scripts/npm_alpha_tag.py "${tarball}" "${VERSION}" "${tag:-latest}")"
+
+          # Trusted publishing (OIDC) can only be granted to a package that already
+          # exists, so a package that has never been published cannot be published
+          # from CI at all. Report it and keep going: the platform packages and the
+          # wrapper share one registry name (`zainocli`), so an unregistered scoped
+          # package must not cost every platform its release.
+          package_name="$(tar -xzOf "${tarball}" package/package.json |
+            python3 -c 'import json,sys; print(json.load(sys.stdin)["name"])')"
+          if ! npm view "${package_name}" version > /dev/null 2>&1; then
+            echo "::warning title=Trusted publisher not configured::${package_name} is not on npm yet"
+            echo "${package_name} has never been published, and npm only accepts a" >&2
+            echo "trusted publisher for a package that already exists. Publish its" >&2
+            echo "first version by hand, then register the trusted publisher:" >&2
+            echo >&2
+            echo "  npm publish ${tarball##*/} --access public" >&2
+            echo "  npm trust github ${package_name} --file rust-release.yml --repo" >&2
+            echo "    ${GITHUB_REPOSITORY} --allow-publish" >&2
+            echo >&2
+            unregistered+=("${package_name}")
+            continue
+          fi
+
+          # A scoped package's first publish defaults to restricted access, which
+          # needs a paid plan and otherwise fails with E403. Declare public access
+          # explicitly so @zaino/* publishes on the first release. Harmless for
+          # unscoped names and for packages already published.
+          publish_cmd=(npm publish "${GITHUB_WORKSPACE}/${tarball}" --access public)
+          if [[ -n "${tag}" ]]; then
+            publish_cmd+=(--tag "${tag}")
+          fi
+
+          # A fresh npm process re-reads the token on each attempt.
+          for attempt in 1 2 3; do
+            echo "+ ${publish_cmd[*]} (attempt ${attempt}/3)"
+            set +e
+            publish_output="$("${publish_cmd[@]}" 2>&1)"
+            publish_status=$?
+            set -e
+
+            echo "${publish_output}"
+            if [[ ${publish_status} -eq 0 ]]; then
+              # npm never fails the OIDC exchange: on error it silently falls back to
+              # token auth, so a missing trusted-publisher registration surfaces as a
+              # credential problem instead of an auth problem. Report what happened.
+              if grep -qiE 'skipped because|failed token exchange|oidc' <<< "${publish_output}" &&
+                ! grep -qiE 'provenance|attestation' <<< "${publish_output}"; then
+                echo "::warning title=OIDC not used::${filename} was published without a" \
+                  "provenance attestation; the trusted-publisher exchange did not run"
+              fi
+              break
+            fi
+
+            if grep -qiE "previously published|cannot publish over|version already exists" <<< "${publish_output}"; then
+              echo "Skipping already-published package version for ${filename}"
+              break
+            fi
+
+            if [[ ${attempt} -eq 3 ]]; then
+              exit "${publish_status}"
+            fi
+            delay=$((attempt * 10))
+            echo "Publishing ${filename} failed; retrying in ${delay} seconds."
+            sleep "${delay}"
+          done
+        done
+        if [[ ${#unregistered[@]} -gt 0 ]]; then
+          echo "::error title=First publication required::Not published, because no" \
+            "trusted publisher can exist yet: ${unregistered[*]}"
+          echo "Everything else was published. Publish each name above once by" >&2
+          echo "hand, then add its trusted publisher and re-run this job." >&2
+          exit 1
+        fi
     - name: Retain npm debug logs
       if: always()
       uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
