@@ -78,58 +78,58 @@ class NpmAlphaTagTest(unittest.TestCase):
         # published release. Also exercise a missing pointer and dotted hotfix.
         cases = [
             (
-                "@zaino/sdk",
+                "zainocli-sdk",
                 "latest",
                 "0.100.0",
                 "0.99.9",
                 "release-0.99.9-latest",
             ),
             (
-                "@zaino/cli",
+                "zainocli",
                 "linux-x64",
                 "0.99.9-linux-x64",
                 "0.100.0",
                 "linux-x64",
             ),
-            ("@zaino/responses-api-proxy", "latest", None, "0.100.0", "latest"),
+            ("zainocli-responses-api-proxy", "latest", None, "0.100.0", "latest"),
             (
-                "@zaino/cli",
+                "zainocli",
                 "alpha",
                 "0.158.0-alpha.10",
                 "0.157.0-alpha.11.1",
                 "release-0.157.0-alpha.11.1-alpha",
             ),
             (
-                "@zaino/cli",
+                "zainocli",
                 "alpha-linux-x64",
                 "0.158.0-alpha.10-linux-x64",
                 "0.157.0-alpha.11.1",
                 "release-0.157.0-alpha.11.1-alpha-linux-x64",
             ),
             (
-                "@zaino/cli",
+                "zainocli",
                 "alpha-win32-arm64",
                 "0.158.0-alpha.9-win32-arm64",
                 "0.158.0-alpha.10",
                 "alpha-win32-arm64",
             ),
             (
-                "@zaino/sdk",
+                "zainocli-sdk",
                 "alpha",
                 "0.158.0-alpha.10",
                 "0.158.0-alpha.10.1",
                 "alpha",
             ),
             (
-                "@zaino/responses-api-proxy",
+                "zainocli-responses-api-proxy",
                 "alpha",
                 "0.159.0-alpha.1",
                 "0.158.0-alpha.10.1",
                 "release-0.158.0-alpha.10.1-alpha",
             ),
-            ("@zaino/sdk", "alpha", None, "0.158.0-alpha.10", "alpha"),
+            ("zainocli-sdk", "alpha", None, "0.158.0-alpha.10", "alpha"),
             (
-                "@zaino/cli",
+                "zainocli",
                 "alpha-linux-x64",
                 "broken-linux-x64",
                 "0.158.0-alpha.10",
@@ -164,7 +164,7 @@ class NpmAlphaTagTest(unittest.TestCase):
     def test_stable_tags_reject_malformed_and_prerelease_versions(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tarball = Path(tmpdir) / "package.tgz"
-            self.write_package(tarball, "@zaino/cli")
+            self.write_package(tarball, "zainocli")
             for tag, current in (
                 ("latest", "broken"),
                 ("linux-x64", "0.100.0-alpha.1-linux-x64"),
@@ -180,7 +180,7 @@ class NpmAlphaTagTest(unittest.TestCase):
     def test_registry_failure_prevents_publish(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tarball = Path(tmpdir) / "package.tgz"
-            self.write_package(tarball, "@zaino/cli")
+            self.write_package(tarball, "zainocli")
             with patch(
                 "npm_alpha_tag.subprocess.run",
                 side_effect=subprocess.CalledProcessError(1, "npm"),
@@ -212,7 +212,7 @@ class NpmAlphaTagTest(unittest.TestCase):
         # pointer for a name that does exist could move latest backwards.
         with tempfile.TemporaryDirectory() as tmpdir:
             tarball = Path(tmpdir) / "package.tgz"
-            self.write_package(tarball, "@zaino/cli")
+            self.write_package(tarball, "zainocli")
             unauthorized = subprocess.CompletedProcess(
                 [], 1, "", "npm error code E401\nnpm error 401 Unauthorized\n"
             )

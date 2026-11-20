@@ -2,12 +2,12 @@
 
 Embed the Codex agent in your workflows and apps.
 
-The TypeScript SDK wraps the `zaino` CLI from `@zaino/cli`. It spawns the CLI and exchanges JSONL events over stdin/stdout.
+The TypeScript SDK wraps the `zaino` CLI from `zainocli`. It spawns the CLI and exchanges JSONL events over stdin/stdout.
 
 ## Installation
 
 ```bash
-npm install @zaino/sdk
+npm install zainocli-sdk
 ```
 
 Requires Node.js 18+.
@@ -15,7 +15,7 @@ Requires Node.js 18+.
 ## Quickstart
 
 ```typescript
-import { Codex } from "@zaino/sdk";
+import { Codex } from "zainocli-sdk";
 
 const codex = new Codex();
 const thread = codex.startThread();

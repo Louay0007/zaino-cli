@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- Publish the SDK and the responses proxy under unscoped names. The `@zaino`
+  scope belongs to another account, so `@zaino/sdk` and
+  `@zaino/responses-api-proxy` could never be published; they are now
+  `zainocli-sdk` and `zainocli-responses-api-proxy`, matching the `zainocli`
+  wrapper that already shipped that way.
+- Fix the SDK failing to find the CLI at runtime. It resolved `@zaino/cli` and
+  `@zaino/cli-<platform>`, names that never existed on npm, so every call threw
+  `Unable to locate Zaino CLI binaries`. It now resolves `zainocli` and
+  `zainocli-<platform>`, which is what a real install actually contains.
+- Fix the wrapper's pnpm/Vite+ install detection looking for a `@zaino/cli`
+  directory that an install never creates. Package-manager detection now works,
+  so update hints name the right command.
+- Fix the CLI's update check and update hints pointing at `@zaino/cli`. The
+  registry lookup used an encoded `@zaino%2fcli` URL that 404s, and every
+  suggested command installed a package that does not exist; both now use
+  `zainocli`.
+- Document the real npm publication path, replacing the instructions to create
+  an npm org that cannot be created.
+
 ## 1.0.1
 
 - Fix `npm install -g zainocli` producing a CLI that could not launch. The 1.0.0

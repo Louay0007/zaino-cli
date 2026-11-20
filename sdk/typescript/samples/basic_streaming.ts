@@ -3,8 +3,8 @@
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 
-import { Codex } from "@zaino/sdk";
-import type { ThreadEvent, ThreadItem } from "@zaino/sdk";
+import { Codex } from "zainocli-sdk";
+import type { ThreadEvent, ThreadItem } from "zainocli-sdk";
 import { codexPathOverride } from "./helpers.ts";
 
 const codex = new Codex({ codexPathOverride: codexPathOverride() });

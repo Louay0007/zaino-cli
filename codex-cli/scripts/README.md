@@ -15,7 +15,7 @@ This downloads the required native package archive artifacts, hydrates `vendor/`
 each package, and writes tarballs to `dist/npm/`.
 
 When `--package zaino` is provided, the staging helper builds the lightweight
-`@zaino/cli` meta package plus all platform-native `@zaino/cli-*` variants
+`zainocli` meta package plus all platform-native `zainocli-*` variants
 that are later published under platform-specific dist-tags.
 
 The npm variants omit the standalone `codex-exec-server` executable and its

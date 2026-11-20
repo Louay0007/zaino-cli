@@ -10,13 +10,13 @@ use codex_install_context::StandalonePlatform;
 pub enum UpdateAction {
     /// Replace the local daemon after restoring the terminal.
     Daemon(DaemonUpdateSource),
-    /// Update via `npm install -g @zaino/cli@latest`.
+    /// Update via `npm install -g zainocli@latest`.
     NpmGlobalLatest,
-    /// Update via `bun install -g @zaino/cli@latest`.
+    /// Update via `bun install -g zainocli@latest`.
     BunGlobalLatest,
-    /// Update via `vp install -g @zaino/cli@latest`.
+    /// Update via `vp install -g zainocli@latest`.
     VitePlusGlobalLatest,
-    /// Update via `pnpm add -g @zaino/cli@latest`.
+    /// Update via `pnpm add -g zainocli@latest`.
     PnpmGlobalLatest,
     /// Update via `brew upgrade codex`.
     BrewUpgrade,
@@ -47,15 +47,15 @@ impl UpdateAction {
     pub fn command_args(self) -> (&'static str, &'static [&'static str]) {
         match self {
             UpdateAction::Daemon(source) => ("zaino", source.command_args()),
-            UpdateAction::NpmGlobalLatest => ("npm", &["install", "-g", "@zaino/cli"]),
-            UpdateAction::BunGlobalLatest => ("bun", &["install", "-g", "@zaino/cli"]),
-            UpdateAction::VitePlusGlobalLatest => ("vp", &["install", "-g", "@zaino/cli"]),
-            UpdateAction::PnpmGlobalLatest => ("pnpm", &["add", "-g", "@zaino/cli"]),
+            UpdateAction::NpmGlobalLatest => ("npm", &["install", "-g", "zainocli"]),
+            UpdateAction::BunGlobalLatest => ("bun", &["install", "-g", "zainocli"]),
+            UpdateAction::VitePlusGlobalLatest => ("vp", &["install", "-g", "zainocli"]),
+            UpdateAction::PnpmGlobalLatest => ("pnpm", &["add", "-g", "zainocli"]),
             UpdateAction::BrewUpgrade => ("brew", &["upgrade", "--cask", "zaino"]),
             // Zaino publishes to npm only: no standalone installer exists, so a
             // standalone install still updates through the npm package.
-            UpdateAction::StandaloneUnix => ("npm", &["install", "-g", "@zaino/cli@latest"]),
-            UpdateAction::StandaloneWindows => ("npm", &["install", "-g", "@zaino/cli@latest"]),
+            UpdateAction::StandaloneUnix => ("npm", &["install", "-g", "zainocli@latest"]),
+            UpdateAction::StandaloneWindows => ("npm", &["install", "-g", "zainocli@latest"]),
         }
     }
 
@@ -145,7 +145,7 @@ mod tests {
 
     #[test]
     fn standalone_install_updates_through_npm() {
-        let expected = ("npm", &["install", "-g", "@zaino/cli@latest"][..]);
+        let expected = ("npm", &["install", "-g", "zainocli@latest"][..]);
         assert_eq!(UpdateAction::StandaloneUnix.command_args(), expected);
         assert_eq!(UpdateAction::StandaloneWindows.command_args(), expected);
     }

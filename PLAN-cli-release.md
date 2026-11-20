@@ -1,5 +1,12 @@
 # Making the Zaino CLI work — the plan
 
+> **Superseded.** This is the 2026-11-13 assessment, kept for the record. All
+> three blockers are closed: `rust-v1.0.1` is published, and
+> `npm install -g zainocli` works on macOS and Linux. The packages ship unscoped
+> (`zainocli`, `zainocli-sdk`, `zainocli-responses-api-proxy`) because the
+> `@zaino` scope belongs to another account. See `PUBLISH.md` for the current
+> process.
+
 **Status at 2026-11-13.** The CLI is a rebranded Codex fork. The agent, the
 provider wiring, the model catalog and the on-disk key handling are all correct
 and point at `api.zaino.soon.it/v1`. The **distribution layer** was never

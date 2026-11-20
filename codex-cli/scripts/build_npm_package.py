@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage and optionally package the @zaino/cli npm module."""
+"""Stage and optionally package the zainocli npm module."""
 
 import argparse
 import json
@@ -19,7 +19,7 @@ ZAINO_NPM_NAME = "zainocli"
 ZAINO_PACKAGE_COMPONENT = "codex-package"
 
 # `npm_name` is the local optional-dependency alias consumed by `bin/zaino.js`.
-# The underlying package published to npm is always `@zaino/cli`.
+# The underlying package published to npm is always `zainocli`.
 ZAINO_PLATFORM_PACKAGES: dict[str, dict[str, str]] = {
     "zaino-linux-x64": {
         "npm_name": "zainocli-linux-x64",

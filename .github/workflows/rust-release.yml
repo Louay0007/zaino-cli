@@ -706,7 +706,7 @@ jobs:
         sdk_tarball="dist/npm/codex-sdk-npm-${VERSION}.tgz"
         # Keep this list in sync with ZAINO_PLATFORM_PACKAGES in
         # codex-cli/scripts/build_npm_package.py. The root wrapper advances
-        # @zaino/cli@latest as soon as it publishes, so every platform
+        # zainocli@latest as soon as it publishes, so every platform
         # package it aliases must already exist in the registry first.
         platform_tarballs=(
           "dist/npm/zaino-npm-linux-x64-${VERSION}.tgz"
@@ -753,7 +753,7 @@ jobs:
         done
 
         # npm returns HTTP 409 when concurrent publishes update the same
-        # packument. Every platform tarball is a version of @zaino/cli,
+        # packument. Every platform tarball is a version of zainocli,
         # so publish all tarballs serially.
         # Only publish tarballs that exist: a platform the build did not produce
         # has no package, and `npm publish` on a missing file aborts the run.

@@ -6,7 +6,7 @@ expression: terminal.backend()
   Update available · 1.0.0 → 9.9.9
   Release notes: https://github.com/Louay0007/zaino-cli/releases/latest
 
-› 1. Update now (runs `npm install -g @zaino/cli`)                              
+› 1. Update now (runs `npm install -g zainocli`)                              
   2. Skip
   3. Skip until next version
 

@@ -1,111 +1,87 @@
-# Publishing `@zaino/cli` to npm
+# Publishing Zaino to npm
 
-The CLI is integration-complete: it logs in through the portal's device flow,
-reports the allowance from `/api/device/usage`, and ships a model catalog that
-matches what the gateway actually serves. What is left is distribution, and it
-needs credentials only you have.
+`zaino 1.0.1` is published. This file records how it got there, what is still
+open, and how the next release publishes without any manual step.
 
 ---
 
-## What is already done
+## Published names
 
-| Step | State |
+The `@zaino` scope is not ours, so every package ships unscoped:
+
+| Package | Purpose |
 |---|---|
-| Version stamped `1.0.0` in `codex-rs/Cargo.toml` | done |
-| Meta package stages correctly | verified — `build_npm_package.py --package zaino --version 1.0.0` |
-| Platform package matrix (6 targets) | defined in the build script |
-| Release workflow points at npm + OIDC | done, unchanged from the fork |
-| Device login against the live portal | verified — issues a code, polls `authorization_pending` correctly |
-| Usage reporting in `login status` | verified — degrades silently on a bad key |
-| 308/308 CLI tests | pass |
+| `zainocli` | wrapper; resolves the platform binary through `optionalDependencies` aliases |
+| `zainocli-linux-x64`, `-linux-arm64`, `-darwin-x64`, `-darwin-arm64` | platform binaries |
+| `zainocli-win32-x64`, `-win32-arm64` | defined, but no Windows build is produced yet |
+| `zainocli-sdk` | TypeScript SDK |
+| `zainocli-responses-api-proxy` | responses API shim |
+
+The four platform binaries publish under the **single registry name `zainocli`**,
+each as a version (`1.0.1-linux-x64`) behind its own dist-tag (`linux-x64`). The
+wrapper's aliases point at those dist-tags.
 
 ---
 
-## The one thing blocking: no npm identity
+## How a release publishes
 
-`npm whoami` fails on this machine. Publishing needs an authenticated npm
-account that owns (or belongs to) the `@zaino` scope. Everything below is
-blocked on that.
+Tag and push — `.github/workflows/rust-release.yml` does the rest:
 
 ```bash
-npm login          # or: npm adduser
-npm whoami         # must print your username
+git tag rust-v1.0.1 && git push origin rust-v1.0.1
 ```
 
-Then create the scope once, in the npm web UI — an organisation named `zaino`:
+`publish-npm` authenticates with **OIDC trusted publishing**, not a stored
+token. It grants `id-token: write`, strips the empty `_authToken` line that
+`setup-node` writes for `registry-url`, and upgrades the npm CLI (OIDC needs
+11.5.1+, and setting dist-tags over OIDC needs 11.21.0+).
 
-- <https://www.npmjs.com/org/create>
+For that to work, each package needs a trusted publisher on npmjs.com
+(**Settings → Trusted Publisher**):
 
-Two more things on that page before the packages can be trusted to publish
-automatically:
+- Publisher: GitHub Actions
+- Repository: `Louay0007/zaino-cli`
+- Workflow filename: `rust-release.yml`
+- Environment name: **blank** — the job declares no `environment:`
 
-1. Add `@zaino/cli`, `@zaino/cli-darwin-arm64`, … (all six) to the org.
-2. Under each package's **Settings → Trusted publishing**, link this repository
-   (`Louay0007/zaino-cli`) and the workflow (`.github/workflows/rust-release.yml`).
-   The release job uses OIDC, not an `NPM_TOKEN`, so without that link the
-   publish step fails with 403.
+Once set, delete any `NPM_TOKEN` secret: OIDC needs none, and npm uses a
+configured token *instead of* attempting the exchange.
 
----
+### The first-publish rule
 
-## Build and publish, in order
-
-The meta package resolves the platform binaries through `optionalDependencies`,
-so **platform packages must be published first** — npm will otherwise serve a
-meta package that cannot install.
+npm accepts a trusted publisher only for a package that already exists, and the
+settings page does not exist until the first publish. So a brand-new package
+needs one manual publish before CI can own it:
 
 ```bash
-# 1. Build the release binaries for each target you intend to ship.
-#    On this machine only darwin-arm64 can be built; the other five need CI
-#    (or a cross-compile toolchain).
-cd codex-rs
-cargo build --release -p codex-cli
-
-# 2. Assemble the vendor tree the packaging script expects:
-#    vendor/<target-triple>/bin/zaino
-mkdir -p /tmp/zaino-vendor/aarch64-apple-darwin/bin
-cp target/release/zaino /tmp/zaino-vendor/aarch64-apple-darwin/bin/zaino
-cat > /tmp/zaino-vendor/aarch64-apple-darwin/codex-package.json <<'JSON'
-{
-  "layoutVersion": 1,
-  "version": "1.0.0",
-  "target": "aarch64-apple-darwin",
-  "variant": "codex",
-  "entrypoint": "bin/zaino"
-}
-JSON
-
-# 3. Stage and pack the platform package (python3.12 — the script uses 3.10+ syntax).
-cd ..
-python3.12 codex-cli/scripts/build_npm_package.py \
-  --package zaino-darwin-arm64 \
-  --version 1.0.0 \
-  --vendor-src /tmp/zaino-vendor \
-  --staging-dir /tmp/stage-darwin-arm64
-
-python3.12 codex-cli/scripts/build_npm_package.py \
-  --package zaino \
-  --version 1.0.0 \
-  --staging-dir /tmp/stage-meta
+npm publish <tarball>.tgz --access public
 ```
 
-Then publish each staged directory with `npm publish /tmp/stage-<name> --tag latest`,
-platform packages first.
-
-**The honest path is CI.** Tag `rust-v1.0.0` and push; `.github/workflows/rust-release.yml`
-builds all six targets, signs and notarizes macOS, and publishes through OIDC.
-That is the only way to get a complete set of packages, and it is already written.
+`publish-npm` handles this gracefully: a name that has never been published is
+collected and reported at the end (with these exact commands) while everything
+else still ships. It treats only a definitive `E404` as "never published" — a
+network or auth failure aborts, so a transient error can never silently skip a
+live package.
 
 ---
 
-## What is still missing after a publish
+## Ordering
+
+Platform packages must exist before the wrapper, because the wrapper's
+`optionalDependencies` aliases resolve to their dist-tags. The job already
+publishes in that order, and it publishes serially: every platform tarball is a
+new version of the same packument, so concurrent writes would race with HTTP 409.
+
+---
+
+## What is still missing
 
 | Gap | Effect | Fix |
 |---|---|---|
-| No GitHub repo `Louay0007/zaino-cli` | every URL the binary emits (update check, release notes, announcement tips) 404s | create the repo and push |
-| macOS binaries unsigned | Gatekeeper blocks the download; users see a security warning | Apple Developer Program ($99/yr) + the `AKV_*` secrets |
-| Installers not hosted | `zaino app` has nothing to fetch | place the DMGs in `DOWNLOADS_DIR/v1.1.5/` on the VPS |
-| Code mode removed from the build | that feature does not ship | re-add `code-mode-host` with `default-members` instead |
-| No Homebrew tap | doctor's `brew upgrade --cask zaino` would fail | either publish a cask or drop the advice |
+| macOS binaries unsigned | Gatekeeper warns on first run | Apple Developer Program + the `AKV_*` secrets |
+| No Windows build | `zainocli-win32-*` never produced | enable the Windows build in the release matrix |
+| No Homebrew tap | doctor's `brew upgrade --cask zaino` fails | publish a cask or drop the advice |
+| Installers not hosted | `zaino app` has nothing to fetch | place the DMGs in `DOWNLOADS_DIR` on the VPS |
 
 ---
 
@@ -114,13 +90,12 @@ That is the only way to get a complete set of packages, and it is already writte
 On a clean machine, with no checkout:
 
 ```bash
-npm install -g @zaino/cli
-zaino --version                 # must print: zaino 1.0.0
+npm install -g zainocli
+zaino --version                 # must print: zaino 1.0.1
 zaino login                     # must print a verification URL and a code
 # approve in the browser, then:
 zaino exec "reply with exactly: OK"
 ```
 
 The last line is the only proof that matters: it exercises the device-issued
-key, the responses shim, and streaming together. It has not yet been run with a
-live key — see the end-to-end note in `PLAN-cli-release.md`.
+key, the responses shim, and streaming together.

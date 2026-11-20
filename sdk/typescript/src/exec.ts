@@ -47,15 +47,15 @@ export type CodexExecArgs = {
 
 const INTERNAL_ORIGINATOR_ENV = "CODEX_INTERNAL_ORIGINATOR_OVERRIDE";
 const TYPESCRIPT_SDK_ORIGINATOR = "codex_sdk_ts";
-const ZAINO_NPM_NAME = "@zaino/cli";
+const ZAINO_NPM_NAME = "zainocli";
 
 const PLATFORM_PACKAGE_BY_TARGET: Record<string, string> = {
-  "x86_64-unknown-linux-musl": "@zaino/cli-linux-x64",
-  "aarch64-unknown-linux-musl": "@zaino/cli-linux-arm64",
-  "x86_64-apple-darwin": "@zaino/cli-darwin-x64",
-  "aarch64-apple-darwin": "@zaino/cli-darwin-arm64",
-  "x86_64-pc-windows-msvc": "@zaino/cli-win32-x64",
-  "aarch64-pc-windows-msvc": "@zaino/cli-win32-arm64",
+  "x86_64-unknown-linux-musl": "zainocli-linux-x64",
+  "aarch64-unknown-linux-musl": "zainocli-linux-arm64",
+  "x86_64-apple-darwin": "zainocli-darwin-x64",
+  "aarch64-apple-darwin": "zainocli-darwin-arm64",
+  "x86_64-pc-windows-msvc": "zainocli-win32-x64",
+  "aarch64-pc-windows-msvc": "zainocli-win32-arm64",
 };
 
 const moduleRequire = createRequire(import.meta.url);

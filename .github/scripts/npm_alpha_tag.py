@@ -35,7 +35,7 @@ def _dist_tags(package: str) -> dict[str, str]:
 
 
 def npm_alpha_tag(tarball: Path, version: str, tag: str) -> str:
-    # Read the actual package name: platform archives share @zaino/cli,
+    # Read the actual package name: platform archives share zainocli,
     # while the SDK and proxy have independent latest/alpha pointers.
     with tarfile.open(tarball, "r:gz") as archive:
         with archive.extractfile("package/package.json") as manifest:

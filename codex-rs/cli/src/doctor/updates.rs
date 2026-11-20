@@ -392,10 +392,10 @@ fn push_cached_version_details(details: &mut Vec<String>, version_file: &Path) {
 
 fn update_action_label(context: &InstallContext) -> &'static str {
     match &context.method {
-        InstallMethod::Npm => "npm install -g @zaino/cli",
-        InstallMethod::Bun => "bun install -g @zaino/cli",
-        InstallMethod::VitePlus => "vp install -g @zaino/cli",
-        InstallMethod::Pnpm => "pnpm add -g @zaino/cli",
+        InstallMethod::Npm => "npm install -g zainocli",
+        InstallMethod::Bun => "bun install -g zainocli",
+        InstallMethod::VitePlus => "vp install -g zainocli",
+        InstallMethod::Pnpm => "pnpm add -g zainocli",
         InstallMethod::Brew => "brew upgrade --cask zaino",
         InstallMethod::Standalone { .. } => "standalone installer",
         InstallMethod::Other => "manual or unknown",
@@ -694,14 +694,14 @@ mod tests {
                 method: InstallMethod::Npm,
                 package_layout: None,
             }),
-            "npm install -g @zaino/cli"
+            "npm install -g zainocli"
         );
         assert_eq!(
             update_action_label(&InstallContext {
                 method: InstallMethod::Pnpm,
                 package_layout: None,
             }),
-            "pnpm add -g @zaino/cli"
+            "pnpm add -g zainocli"
         );
         assert_eq!(
             update_action_label(&InstallContext {

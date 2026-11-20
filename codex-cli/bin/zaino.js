@@ -118,10 +118,7 @@ function isPnpmOwnedZainoInstall(nodeModulesDir) {
   }
 
   try {
-    return (
-      realpathSync(path.join(nodeModulesDir, "@zaino", "cli")) ===
-      zainoPackageRoot
-    );
+    return realpathSync(path.join(nodeModulesDir, "zainocli")) === zainoPackageRoot;
   } catch {
     return false;
   }
@@ -134,24 +131,24 @@ function isVitePlusOwnedZainoInstall(packagesDir) {
 
   try {
     const metadata = JSON.parse(
-      readFileSync(path.join(packagesDir, "@zaino", "cli.json"), "utf8"),
+      readFileSync(path.join(packagesDir, "zainocli.json"), "utf8"),
     );
-    if (metadata.name !== "@zaino/cli") {
+    if (metadata.name !== "zainocli") {
       return false;
     }
 
-    // Vite+ records the active global installation in packages/@zaino/cli.json.
+    // Vite+ records the active global installation in packages/zainocli.json.
     // Older installs have no ID or append a #-prefixed ID to the package name;
     // newer installs put the ID in a subdirectory of the package prefix.
     const installId = metadata.installId || "";
     const installDir = installId.startsWith("#")
-      ? path.join(packagesDir, `@zaino/cli${installId}`)
-      : path.join(packagesDir, "@zaino/cli", installId);
+      ? path.join(packagesDir, `zainocli${installId}`)
+      : path.join(packagesDir, "zainocli", installId);
     for (const nodeModulesDir of [
       path.join(installDir, "lib", "node_modules"),
       path.join(installDir, "node_modules"),
     ]) {
-      const packageRoot = path.join(nodeModulesDir, "@zaino", "cli");
+      const packageRoot = path.join(nodeModulesDir, "zainocli");
       if (
         existsSync(packageRoot) &&
         realpathSync(packageRoot) === zainoPackageRoot

@@ -1,6 +1,6 @@
 #!/usr/bin/env -S NODE_NO_WARNINGS=1 pnpm ts-node-esm --files
 
-import { Codex } from "@zaino/sdk";
+import { Codex } from "zainocli-sdk";
 
 import { codexPathOverride } from "./helpers.ts";
 

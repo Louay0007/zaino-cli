@@ -1,5 +1,5 @@
 {
-  "name": "@zaino/responses-api-proxy",
+  "name": "zainocli-responses-api-proxy",
   "version": "0.0.0-dev",
   "license": "Apache-2.0",
   "bin": {
